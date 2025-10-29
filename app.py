@@ -309,8 +309,6 @@ def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, 
                          process_sequence_list, machine_definitions_list, constraint_params):
     """Visualizes the final layout using matplotlib. Returns a fig object."""
     
-    # NOTE: Removed the 'Malgun Gothic' font block as it causes errors on Streamlit Cloud (Linux)
-
     fig, ax = plt.subplots(1, figsize=(max(10, factory_w/2), max(10, factory_h/2 + 1))) 
     ax.set_xlim(-0.5, factory_w - 0.5)
     ax.set_ylim(-0.5, factory_h - 0.5)
@@ -1149,20 +1147,21 @@ st.sidebar.title("Configuration")
 
 # Factory Settings
 st.sidebar.header("🏭 Factory Settings")
-factory_w = st.sidebar.number_input("Factory Width (units)", min_value=10, max_value=100, value=28)
-factory_h = st.sidebar.number_input("Factory Height (units)", min_value=10, max_value=100, value=28)
+# *** THESE VALUES ARE REDUCED TO PREVENT CRASHING ON STREAMLIT CLOUD ***
+factory_w = st.sidebar.number_input("Factory Width (units)", min_value=10, max_value=100, value=20) # Reduced from 28
+factory_h = st.sidebar.number_input("Factory Height (units)", min_value=10, max_value=100, value=20) # Reduced from 28
 target_tph = st.sidebar.number_input("Target Production (units/hr)", min_value=1, max_value=200, value=35)
 material_travel_speed = st.sidebar.slider("Material Travel Speed (units/sec)", 0.1, 5.0, 0.5, 0.1)
 
 # GA Hyperparameters
 with st.sidebar.expander("🧬 GA Hyperparameters", expanded=False):
     # *** THESE VALUES ARE REDUCED TO PREVENT CRASHING ON STREAMLIT CLOUD ***
-    population_size = st.sidebar.number_input("Population Size", min_value=10, max_value=1000, value=40)  # Reduced from 300
-    num_generations = st.sidebar.number_input("Number of Generations", min_value=10, max_value=2000, value=25)  # Reduced from 300
+    population_size = st.sidebar.number_input("Population Size", min_value=10, max_value=1000, value=20)  # Reduced from 40
+    num_generations = st.sidebar.number_input("Number of Generations", min_value=10, max_value=2000, value=10)  # Reduced from 25
     mutation_rate = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.5, 0.01)
     crossover_rate = st.sidebar.slider("Crossover Rate", 0.0, 1.0, 0.8, 0.01)
-    elitism_count = st.sidebar.number_input("Elitism Count", min_value=1, max_value=20, value=2) # Reduced from 5
-    tournament_size = st.sidebar.number_input("Tournament Size", min_value=2, max_value=20, value=3) # Reduced from 5
+    elitism_count = st.sidebar.number_input("Elitism Count", min_value=1, max_value=20, value=2)
+    tournament_size = st.sidebar.number_input("Tournament Size", min_value=2, max_value=20, value=3)
 
 # Fitness Weights
 with st.sidebar.expander("⚖️ Fitness Weights", expanded=False):
@@ -1281,7 +1280,7 @@ if run_button:
             
             col4, col5, col6 = st.columns(3)
             col4.metric("Euclidean Distance", f"{ga_metrics.get('distance', 0.0):.2f} units")
-            col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
+            col5.metric("Area Utilization", f"{ga_modules.get('utilization_ratio', 0.0):.2%}")
             col6.metric("Zone 1 Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
 
             st.header("Performance Summary")
