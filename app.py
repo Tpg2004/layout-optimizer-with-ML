@@ -3,34 +3,65 @@ import random
 import math
 import copy
 import os
-import signal
 import json
 import heapq
+import io
+from contextlib import redirect_stdout
 from collections import deque
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.font_manager as fm
 from matplotlib.colors import LinearSegmentedColormap
-import pandas as pd
-import time
 
 # --- App Configuration ---
-st.set_page_config(
-    page_title="Factory Layout Optimizer 🏭",
-    page_icon="🏭",
-    layout="wide",
-    initial_sidebar_state="expanded",
+st.set_page_config(layout="wide", page_title="Factory Layout Optimizer")
+st.title("🏭 GA Factory Layout & A* Flow Optimizer")
+st.info(
+    "Configure your factory, machines, and optimization parameters in the sidebar. "
+    "Click 'Run Optimization' to start the Genetic Algorithm and A* pathfinding analysis."
 )
 
-# --- Core Optimization & Visualization Code (Adapted from your script) ---
-# Note: Most functions are kept identical, with minor tweaks for Streamlit integration.
+# --- Original Code (Refactored into Functions) ---
 
-# Utility Classes & Functions
+# Note: The Machine class is not strictly used by the GA logic, 
+# as it operates on dictionaries, but it's good practice to keep.
 class Machine:
     def __init__(self, id, name, footprint, cycle_time=0, clearance=0, wall_affinity=False):
         self.id = id; self.name = name; self.footprint = footprint; self.cycle_time = cycle_time
         self.clearance = clearance; self.wall_affinity = wall_affinity; self.position = None
 
-# --- Core GA & Pathfinding Logic ---
+# Default Machine Definitions (as a JSON string for the text area)
+DEFAULT_MACHINES_JSON = """
+[
+    {"id": 0, "name": "Raw Material Input", "footprint": [2, 2], "cycle_time": 20, "clearance": 1, "zone_group": null},
+    {"id": 1, "name": "1st Cutting", "footprint": [3, 3], "cycle_time": 35, "clearance": 1, "zone_group": 1},
+    {"id": 2, "name": "Milling Process", "footprint": [4, 2], "cycle_time": 45, "clearance": 1, "zone_group": 1},
+    {"id": 3, "name": "Drilling", "footprint": [2, 2], "cycle_time": 25, "clearance": 1, "zone_group": 1},
+    {"id": 4, "name": "Heat Treatment A", "footprint": [3, 4], "cycle_time": 70, "clearance": 2, "zone_group": null},
+    {"id": 5, "name": "Precision Machining A", "footprint": [3, 2], "cycle_time": 40, "clearance": 1, "zone_group": 2},
+    {"id": 6, "name": "Assembly A", "footprint": [2, 3], "cycle_time": 55, "clearance": 2, "zone_group": 3},
+    {"id": 7, "name": "Final Inspection A", "footprint": [1, 2], "cycle_time": 15, "clearance": 1, "zone_group": 3},
+    {"id": 8, "name": "2nd Cutting", "footprint": [3, 2], "cycle_time": 30, "clearance": 1, "zone_group": 1},
+    {"id": 9, "name": "Surface Treatment", "footprint": [2, 4], "cycle_time": 50, "clearance": 2, "zone_group": null},
+    {"id": 10, "name": "Washing Process 1", "footprint": [2, 2], "cycle_time": 20, "clearance": 1, "zone_group": 2},
+    {"id": 11, "name": "Heat Treatment B", "footprint": [4, 4], "cycle_time": 75, "clearance": 2, "zone_group": null},
+    {"id": 12, "name": "Precision Machining B", "footprint": [2, 3], "cycle_time": 42, "clearance": 1, "zone_group": 2},
+    {"id": 13, "name": "Component Assembly", "footprint": [3, 3], "cycle_time": 60, "clearance": 1, "zone_group": 3},
+    {"id": 14, "name": "Quality Inspection B", "footprint": [2, 1], "cycle_time": 18, "clearance": 1, "zone_group": 3},
+    {"id": 15, "name": "Packaging Line A", "footprint": [4, 3], "cycle_time": 30, "clearance": 2, "zone_group": null}
+]
+"""
+# Default Process Sequence (as a JSON string)
+DEFAULT_PROCESS_SEQUENCE_JSON = "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]"
+
+# Default Zone 1 Targets (as a JSON string)
+DEFAULT_ZONE_1_TARGETS_JSON = "[1, 2, 3, 8]"
+
+# Time Constants
+SECONDS_PER_HOUR = 3600
+
+# --- Core GA Utility Functions ---
+
 def initialize_layout_grid(width, height):
     return [[-1 for _ in range(height)] for _ in range(width)]
 
@@ -65,6 +96,7 @@ def get_machine_cycle_time(machine_id, all_machines_data):
     return float('inf')
 
 def create_individual(machines_in_processing_order_defs, factory_w, factory_h):
+    """Generates a valid, initial layout chromosome."""
     chromosome = []
     grid = initialize_layout_grid(factory_w, factory_h)
     for machine_def in machines_in_processing_order_defs:
@@ -81,125 +113,307 @@ def create_individual(machines_in_processing_order_defs, factory_w, factory_h):
             place_machine_on_grid(grid, machine_def["id"], m_footprint, chosen_x, chosen_y)
     return chromosome
 
+def calculate_manhattan_distance(pos1, pos2):
+    return abs(pos1['center_x'] - pos2['center_x']) + abs(pos1['center_y'] - pos2['center_y'])
+
 def calculate_total_distance(machine_positions, process_sequence, distance_type='euclidean'):
     total_distance = 0
     if not machine_positions or len(process_sequence) < 2: return float('inf')
+    
     for i in range(len(process_sequence) - 1):
         m1_id, m2_id = process_sequence[i], process_sequence[i+1]
-        pos1, pos2 = machine_positions.get(m1_id), machine_positions.get(m2_id)
+        pos1 = machine_positions.get(m1_id)
+        pos2 = machine_positions.get(m2_id)
+        
         if not pos1 or not pos2: return float('inf')
-        dx, dy = pos1['center_x'] - pos2['center_x'], pos1['center_y'] - pos2['center_y']
+        
+        dx = pos1['center_x'] - pos2['center_x']
+        dy = pos1['center_y'] - pos2['center_y']
+        
         if distance_type == 'manhattan':
-            total_distance += abs(dx) + abs(dy)
-        else:
-            total_distance += math.sqrt(dx**2 + dy**2)
+            distance = abs(dx) + abs(dy)
+        else: # euclidean
+            distance = math.sqrt(dx**2 + dy**2)
+            
+        total_distance += distance
     return total_distance
 
 def calculate_area_metrics(machine_positions, machines_defs_ordered_by_proc_seq, factory_w, factory_h):
     total_footprint_area = 0
+    
     for machine_def in machines_defs_ordered_by_proc_seq:
         if machine_def["id"] in machine_positions:
             w, h = machine_def["footprint"]
             total_footprint_area += w * h
+            
     factory_area = factory_w * factory_h
-    return total_footprint_area, total_footprint_area / factory_area
+    utilization_ratio = total_footprint_area / factory_area
+    
+    return total_footprint_area, utilization_ratio
 
-def calculate_zone_penalty(machine_positions, zone_target_ids, max_spread_dist):
+def calculate_zone_penalty(machine_positions, constraint_params):
+    zone_target_ids = constraint_params['zone_1_target_machines']
+    max_spread_dist = constraint_params['zone_1_max_spread_distance']
+
     zone_machines_pos = [machine_positions[m_id] for m_id in zone_target_ids if m_id in machine_positions]
+    
     if len(zone_machines_pos) < 2: return 0.0
+    
     max_dist = 0.0
     for i in range(len(zone_machines_pos)):
         for j in range(i + 1, len(zone_machines_pos)):
-            pos1, pos2 = zone_machines_pos[i], zone_machines_pos[j]
+            pos1 = zone_machines_pos[i]
+            pos2 = zone_machines_pos[j]
             dist = math.sqrt((pos1['center_x'] - pos2['center_x'])**2 + (pos1['center_y'] - pos2['center_y'])**2)
             if dist > max_dist: max_dist = dist
+            
     if max_dist > max_spread_dist:
-        return (max_dist - max_spread_dist) ** 2
+        penalty = (max_dist - max_spread_dist) ** 2
+        return penalty
     return 0.0
 
-def calculate_machine_utilization_and_bottleneck(machine_positions, process_sequence, all_machines_data, travel_speed, seconds_per_hour):
+def calculate_machine_utilization_and_bottleneck(machine_positions, process_sequence, all_machines_data, travel_speed):
     if not machine_positions or not process_sequence: return (0.0, {})
+    
     stage_times = {}
+    
     for i in range(len(process_sequence)):
         current_machine_id = process_sequence[i]
         machine_cycle_time = get_machine_cycle_time(current_machine_id, all_machines_data)
+        
         travel_time_to_next = 0.0
         if i < len(process_sequence) - 1:
             next_machine_id = process_sequence[i+1]
-            pos_curr, pos_next = machine_positions.get(current_machine_id), machine_positions.get(next_machine_id)
+            pos_curr = machine_positions.get(current_machine_id)
+            pos_next = machine_positions.get(next_machine_id)
+            
             if pos_curr and pos_next:
                 distance = math.sqrt((pos_curr['center_x'] - pos_next['center_x'])**2 + (pos_curr['center_y'] - pos_next['center_y'])**2)
-                if travel_speed > 0:
+                if travel_speed > 0: 
                     travel_time_to_next = distance / travel_speed
-                else:
+                else: 
                     travel_time_to_next = float('inf')
-        stage_times[current_machine_id] = machine_cycle_time + travel_time_to_next
+
+        current_stage_total_time = machine_cycle_time + travel_time_to_next
+        stage_times[current_machine_id] = current_stage_total_time
+
     max_stage_time = max(stage_times.values()) if stage_times else 0.0
-    if max_stage_time <= 0 or max_stage_time == float('inf'): return (0.0, {})
+    if max_stage_time <= 0 or max_stage_time == float('inf'):
+        return (0.0, {})
+
     utilization_data = {}
-    for machine_id in process_sequence:
+    for i, machine_id in enumerate(process_sequence):
         machine_cycle_time = get_machine_cycle_time(machine_id, all_machines_data)
+        
         if machine_cycle_time == float('inf') or max_stage_time == 0.0:
             utilization_data[machine_id] = 0.0
         else:
-            utilization_data[machine_id] = min(1.0, machine_cycle_time / max_stage_time)
+            utilization = machine_cycle_time / max_stage_time
+            utilization_data[machine_id] = min(1.0, utilization)
+            
     return (max_stage_time, utilization_data)
+
 
 def calculate_fitness(chromosome, machines_defs_ordered_by_proc_seq, process_seq_ids,
                       factory_w, factory_h, target_prod_throughput, material_travel_speed,
-                      seconds_per_hour, weights, bonus_factor, zone_params, area_util_min_thresh):
+                      all_machines_data, fitness_weights, constraint_params):
+    
     grid = initialize_layout_grid(factory_w, factory_h)
     machine_positions = {}
-    result = {"fitness": -float('inf'), "distance": float('inf'), "throughput": 0.0, "is_valid": False,
-              "zone_penalty": 0.0, "mhs_turn_penalty": 0.0, "utilization_ratio": 0.0, "machine_utilization": {}}
+    all_machines_placed_successfully = True
+    
+    result = {"fitness": -float('inf'), "distance": float('inf'), "throughput": 0.0, 
+              "is_valid": False, "zone_penalty": 0.0, "mhs_turn_penalty": 0.0, 
+              "utilization_ratio": 0.0, "machine_utilization": {}}
+
     if len(chromosome) != len(machines_defs_ordered_by_proc_seq): return result
 
     for i, machine_def in enumerate(machines_defs_ordered_by_proc_seq):
         pos_x, pos_y = chromosome[i]
-        if pos_x == -1 and pos_y == -1: return result
+        if pos_x == -1 and pos_y == -1: all_machines_placed_successfully = False; break
+        
         m_footprint, m_clearance, m_id = machine_def["footprint"], machine_def.get("clearance", 0), machine_def["id"]
+        
         if not can_place_machine(grid, m_footprint, m_clearance, pos_x, pos_y, factory_w, factory_h):
-            return result
+            all_machines_placed_successfully = False; break
+            
         place_machine_on_grid(grid, m_id, m_footprint, pos_x, pos_y)
         machine_positions[m_id] = {"x": pos_x, "y": pos_y, "center_x": pos_x + m_footprint[0]/2.0, "center_y": pos_y + m_footprint[1]/2.0}
 
+    if not all_machines_placed_successfully or len(machine_positions) != len(machines_defs_ordered_by_proc_seq):
+        return result 
+
+    # 1. Throughput & Machine Utilization 
     max_stage_time, utilization_data = calculate_machine_utilization_and_bottleneck(
-        machine_positions, process_seq_ids, machines_defs_ordered_by_proc_seq, material_travel_speed, seconds_per_hour)
+        machine_positions, process_seq_ids, all_machines_data, material_travel_speed)
+    
     result["machine_utilization"] = utilization_data
-    throughput = seconds_per_hour / max_stage_time if max_stage_time > 0 and max_stage_time != float('inf') else 0.0
+    throughput = SECONDS_PER_HOUR / max_stage_time if max_stage_time > 0 and max_stage_time != float('inf') else 0.0
+    
     if max_stage_time == float('inf') or throughput == 0.0: return result
 
-    total_euclidean_dist = calculate_total_distance(machine_positions, process_seq_ids, 'euclidean')
-    zone_penalty = calculate_zone_penalty(machine_positions, zone_params['target_machines'], zone_params['max_spread_dist'])
-    _, utilization_ratio = calculate_area_metrics(machine_positions, machines_defs_ordered_by_proc_seq, factory_w, factory_h)
-    utilization_bonus = (utilization_ratio - area_util_min_thresh) * factory_w * factory_h * weights['utilization_bonus'] if utilization_ratio >= area_util_min_thresh else 0.0
-    total_manhattan_dist = calculate_total_distance(machine_positions, process_seq_ids, 'manhattan')
-    mhs_turn_penalty_value = total_manhattan_dist * weights['mhs_turn_penalty']
+    # 2. Euclidean Distance
+    total_euclidean_dist = calculate_total_distance(machine_positions, process_seq_ids, distance_type='euclidean')
 
-    fitness_val = (weights['throughput'] * throughput) \
-                  - (weights['distance'] * total_euclidean_dist) \
-                  - (weights['zone_penalty'] * zone_penalty) \
+    # 3. Zone Constraint Penalty (NEW)
+    zone_penalty = calculate_zone_penalty(machine_positions, constraint_params)
+    result["zone_penalty"] = zone_penalty
+    
+    # 4. Area Utilization Bonus (NEW)
+    _, utilization_ratio = calculate_area_metrics(machine_positions, machines_defs_ordered_by_proc_seq, factory_w, factory_h)
+    result["utilization_ratio"] = utilization_ratio
+    utilization_bonus = 0.0
+    if utilization_ratio >= constraint_params['area_util_min_threshold']:
+        utilization_bonus = (utilization_ratio - constraint_params['area_util_min_threshold']) * factory_w * factory_h * fitness_weights["utilization_bonus"]
+
+    # 5. MHS Turn Penalty (Approximation using Manhattan distance) (NEW)
+    total_manhattan_dist = calculate_total_distance(machine_positions, process_seq_ids, distance_type='manhattan')
+    mhs_turn_penalty_value = total_manhattan_dist * fitness_weights["mhs_turn_penalty"]
+    result["mhs_turn_penalty"] = mhs_turn_penalty_value
+
+    # Combine fitness components
+    fitness_val = (fitness_weights["throughput"] * throughput) \
+                  - (fitness_weights["distance"] * total_euclidean_dist) \
+                  - (fitness_weights["zone_penalty"] * zone_penalty) \
                   - mhs_turn_penalty_value \
                   + utilization_bonus
-    if throughput >= target_prod_throughput:
-        fitness_val += throughput * bonus_factor
-
-    result.update({"fitness": fitness_val, "distance": total_euclidean_dist, "throughput": throughput, "is_valid": True,
-                   "zone_penalty": zone_penalty, "mhs_turn_penalty": mhs_turn_penalty_value, "utilization_ratio": utilization_ratio})
+                  
+    if throughput >= target_prod_throughput: 
+        fitness_val += throughput * fitness_weights["bonus_for_target_achievement"]
+    
+    result["fitness"] = fitness_val
+    result["distance"] = total_euclidean_dist
+    result["throughput"] = throughput
+    result["is_valid"] = True
     return result
 
-def selection(population_with_eval_results, tournament_size):
+
+def print_layout(grid, machine_positions, factory_w, factory_h, process_sequence, machines_definitions):
+    """This function is designed to be captured by redirect_stdout."""
+    print("--- Current Layout ---")
+    for row_idx_actual in range(factory_h -1, -1, -1):
+        row_to_print = [f"{grid[col_idx_actual][row_idx_actual]:2d}" if grid[col_idx_actual][row_idx_actual] != -1 else "__" for col_idx_actual in range(factory_w)]
+        print(f"Y{row_idx_actual:<2}| " + " ".join(row_to_print))
+    header = "    " + " ".join(f"X{i:<2}" for i in range(factory_w))
+    print("-" * len(header)); print(header)
+    if not machine_positions: print("No facilities placed"); return
+    print("\n--- Machine Positions (Top-Left, Center) ---")
+    for machine_id in process_sequence:
+        if machine_id in machine_positions:
+            pos_data = machine_positions[machine_id]
+            machine_def = next((m for m in machines_definitions if m["id"] == machine_id), None)
+            machine_name = machine_def["name"] if machine_def else "Unknown"
+            print(f"Machine ID {machine_id} ({machine_name}): Top-Left ({pos_data['x']}, {pos_data['y']}), Center ({pos_data['center_x']:.1f}, {pos_data['center_y']:.1f})")
+
+def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, factory_h, 
+                         process_sequence_list, machine_definitions_list, constraint_params):
+    """Visualizes the final layout using matplotlib. Returns a fig object."""
+    
+    # NOTE: Removed the 'Malgun Gothic' font block as it causes errors on Streamlit Cloud (Linux)
+
+    fig, ax = plt.subplots(1, figsize=(max(10, factory_w/2), max(10, factory_h/2 + 1))) 
+    ax.set_xlim(-0.5, factory_w - 0.5)
+    ax.set_ylim(-0.5, factory_h - 0.5)
+    ax.set_xticks(range(factory_w))
+    ax.set_yticks(range(factory_h))
+    ax.set_xticklabels(range(factory_w))
+    ax.set_yticklabels(range(factory_h))
+    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.set_aspect('equal', adjustable='box')
+    ax.invert_yaxis() 
+
+    cmap = plt.colormaps.get_cmap('viridis')
+    num_machines = len(machine_definitions_list)
+    machines_dict_by_id = {m['id']: m for m in machine_definitions_list}
+
+    # --- Draw Zone Constraint Boundary (NEW) ---
+    zone_1_target_machines = constraint_params['zone_1_target_machines']
+    zone_1_max_spread_distance = constraint_params['zone_1_max_spread_distance']
+    
+    zone_1_centers = [machine_positions_map[m_id] for m_id in zone_1_target_machines if m_id in machine_positions_map]
+    if len(zone_1_centers) > 0:
+        center_x_coords = [c['center_x'] for c in zone_1_centers]
+        center_y_coords = [c['center_y'] for c in zone_1_centers]
+        
+        min_cx, max_cx = min(center_x_coords), max(center_x_coords)
+        min_cy, max_cy = min(center_y_coords), max(center_y_coords)
+        
+        avg_cx, avg_cy = (min_cx + max_cx) / 2, (min_cy + max_cy) / 2
+        
+        max_dist_from_avg_sq = 0
+        for cx, cy in zip(center_x_coords, center_y_coords):
+            dist_sq = (cx - avg_cx)**2 + (cy - avg_cy)**2
+            if dist_sq > max_dist_from_avg_sq:
+                max_dist_from_avg_sq = dist_sq
+        
+        required_radius = zone_1_max_spread_distance / 2.0
+        
+        circle_required = patches.Circle((avg_cx - 0.5, avg_cy - 0.5), 
+                                         radius=required_radius, 
+                                         linewidth=2, 
+                                         edgecolor='red', 
+                                         facecolor='none', 
+                                         linestyle='--', 
+                                         alpha=0.4,
+                                         label=f"Zone 1 Max Spread ({zone_1_max_spread_distance})")
+        ax.add_patch(circle_required)
+
+
+    # --- Draw Machines ---
+    for machine_id_in_seq in process_sequence_list:
+        if machine_id_in_seq in machine_positions_map:
+            pos_data = machine_positions_map[machine_id_in_seq]
+            machine_info = machines_dict_by_id.get(machine_id_in_seq)
+
+            if machine_info:
+                x, y = pos_data['x'], pos_data['y']
+                width, height = machine_info['footprint']
+                clearance = machine_info.get('clearance', 0)
+                
+                color_value = machine_id_in_seq / max(num_machines - 1, 1) 
+                rect_body = patches.Rectangle((x - 0.5, y - 0.5), width, height,
+                                              linewidth=1.5, edgecolor='black',
+                                              facecolor=cmap(color_value), alpha=0.7)
+                ax.add_patch(rect_body)
+
+                text_x = x + width / 2 - 0.5
+                text_y = y + height / 2 - 0.5
+                ax.text(text_x, text_y, f"M{machine_id_in_seq}\n({machine_info['name'][:5]}..)",
+                        ha='center', va='center', fontsize=6, color='white', weight='bold')
+                
+                if clearance > 0:
+                    rect_clearance = patches.Rectangle(
+                        (x - clearance - 0.5, y - clearance - 0.5),
+                        width + 2 * clearance, height + 2 * clearance,
+                        linewidth=1, edgecolor=cmap(color_value),
+                        facecolor='none', linestyle=':', alpha=0.5
+                    )
+                    ax.add_patch(rect_clearance)
+
+    plt.title("Optimized Factory Layout (GA) with Zone Constraint", fontsize=12)
+    plt.xlabel("Factory Width (X)")
+    plt.ylabel("Factory Height (Y)")
+    plt.gca().invert_yaxis() 
+    plt.legend()
+    
+    return fig
+
+def selection(population_with_eval_results, tournament_size): 
+    if not population_with_eval_results: return None
     actual_tournament_size = min(tournament_size, len(population_with_eval_results))
-    if not population_with_eval_results or actual_tournament_size == 0: return None
+    if actual_tournament_size == 0: return None
     tournament = random.sample(population_with_eval_results, actual_tournament_size)
-    return max(tournament, key=lambda item: item[1]['fitness'])[0]
+    winner = max(tournament, key=lambda item: item[1]['fitness']) 
+    return winner[0] 
 
 def crossover(parent1_chromo, parent2_chromo, crossover_rate):
     child1, child2 = list(parent1_chromo), list(parent2_chromo)
-    if random.random() < crossover_rate and len(parent1_chromo) > 1:
-        cut_point = random.randint(1, len(parent1_chromo) - 1)
-        child1 = parent1_chromo[:cut_point] + parent2_chromo[cut_point:]
-        child2 = parent2_chromo[:cut_point] + parent1_chromo[cut_point:]
+    if random.random() < crossover_rate:
+        num_genes = len(parent1_chromo)
+        if num_genes > 1:
+            cut_point = random.randint(1, num_genes - 1)
+            child1 = parent1_chromo[:cut_point] + parent2_chromo[cut_point:]
+            child2 = parent2_chromo[:cut_point] + parent1_chromo[cut_point:]
     return child1, child2
 
 def mutate(chromosome, machines_in_proc_order_defs, factory_w, factory_h, mutation_rate_per_gene=0.1):
@@ -225,684 +439,874 @@ def mutate(chromosome, machines_in_proc_order_defs, factory_w, factory_h, mutati
             if valid_new_placements: mutated_chromosome[i] = random.choice(valid_new_placements)
     return mutated_chromosome
 
+# ----------------------------------------------------------------------------------------------------
+# ----------------------------------- A* Pathfinding Functions ---------------------------------------
+# ----------------------------------------------------------------------------------------------------
+
 def heuristic(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+def find_nearest_free_space(obstacle_grid, target_point, factory_w, factory_h, max_search_radius=5):
+    if not (0 <= target_point[0] < factory_w and 0 <= target_point[1] < factory_h):
+        return None
+        
+    if obstacle_grid[target_point[0]][target_point[1]] == 0:
+        return target_point
+        
+    queue = deque([target_point])
+    visited = set([target_point])
+    directions = [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)] 
+    
+    current_radius = 0
+    while queue and current_radius <= max_search_radius:
+        level_size = len(queue)
+        current_radius += 1
+        
+        for _ in range(level_size):
+            x, y = queue.popleft()
+            
+            for dx, dy in directions:
+                nx, ny = x + dx, y + dy
+                
+                if not (0 <= nx < factory_w and 0 <= ny < factory_h):
+                    continue
+                    
+                if (nx, ny) in visited:
+                    continue
+                    
+                visited.add((nx, ny))
+                
+                if obstacle_grid[nx][ny] == 0:
+                    return (nx, ny)
+                    
+                queue.append((nx, ny))
+    
+    return None
 
 def find_machine_access_points(machine_pos_info, machine_def, obstacle_grid, factory_w, factory_h):
     footprint_w, footprint_h = machine_def["footprint"]
     start_x, start_y = machine_pos_info["x"], machine_pos_info["y"]
+    
     access_points = []
+    
     for x in range(start_x, start_x + footprint_w):
-        for dy in [-1, footprint_h]:
+        for dy in [-1, footprint_h]: # Top (y-1) and Bottom (y+height)
             y = start_y + dy
             if 0 <= x < factory_w and 0 <= y < factory_h and obstacle_grid[x][y] == 0:
                 access_points.append((x, y))
+    
     for y in range(start_y, start_y + footprint_h):
-        for dx in [-1, footprint_w]:
+        for dx in [-1, footprint_w]: # Left (x-1) and Right (x+width)
             x = start_x + dx
             if 0 <= x < factory_w and 0 <= y < factory_h and obstacle_grid[x][y] == 0:
                 access_points.append((x, y))
+    
     return list(set(access_points))
 
 def get_best_access_point(machine_pos_info, machine_def, obstacle_grid, factory_w, factory_h):
+    center_x = int(round(machine_pos_info["center_x"]))
+    center_y = int(round(machine_pos_info["center_y"]))
+    
+    if (0 <= center_x < factory_w and 0 <= center_y < factory_h and 
+        obstacle_grid[center_x][center_y] == 0):
+        return (center_x, center_y)
+    
     access_points = find_machine_access_points(machine_pos_info, machine_def, obstacle_grid, factory_w, factory_h)
-    if not access_points:
-        center_x, center_y = int(round(machine_pos_info["center_x"])), int(round(machine_pos_info["center_y"]))
-        return (center_x, center_y) # Fallback
-    center_point = (machine_pos_info["center_x"], machine_pos_info["center_y"])
-    return min(access_points, key=lambda p: abs(p[0] - center_point[0]) + abs(p[1] - center_point[1]))
+    
+    if access_points:
+        center_point = (machine_pos_info["center_x"], machine_pos_info["center_y"])
+        best_point = min(access_points, 
+                         key=lambda p: abs(p[0] - center_point[0]) + abs(p[1] - center_point[1]))
+        return best_point
+    
+    fallback_point = find_nearest_free_space(obstacle_grid, (center_x, center_y), 
+                                             factory_w, factory_h, max_search_radius=10)
+    
+    if fallback_point:
+        return fallback_point
+    
+    return (center_x, center_y) 
 
-def get_optimized_access_point_for_sequence(prev_access_point, current_pos_info, current_machine_def,
+def get_optimized_access_point_for_sequence(prev_access_point, current_pos_info, current_machine_def, 
                                             next_pos_info, next_machine_def, obstacle_grid, factory_w, factory_h):
-    current_access_points = find_machine_access_points(current_pos_info, current_machine_def, obstacle_grid, factory_w, factory_h)
+    current_access_points = find_machine_access_points(current_pos_info, current_machine_def, 
+                                                       obstacle_grid, factory_w, factory_h)
+    
     if not current_access_points:
         return get_best_access_point(current_pos_info, current_machine_def, obstacle_grid, factory_w, factory_h)
-    next_target = get_best_access_point(next_pos_info, next_machine_def, obstacle_grid, factory_w, factory_h)
-    best_point = min(current_access_points, key=lambda p: (abs(prev_access_point[0] - p[0]) + abs(prev_access_point[1] - p[1])) + (abs(p[0] - next_target[0]) + abs(p[1] - next_target[1])))
+    
+    next_access_points = find_machine_access_points(next_pos_info, next_machine_def, 
+                                                    obstacle_grid, factory_w, factory_h)
+    
+    if not next_access_points:
+        next_target = get_best_access_point(next_pos_info, next_machine_def, obstacle_grid, factory_w, factory_h)
+    else:
+        next_center = (next_pos_info["center_x"], next_pos_info["center_y"])
+        next_target = min(next_access_points, 
+                          key=lambda p: abs(p[0] - next_center[0]) + abs(p[1] - next_center[1]))
+    
+    best_point = None
+    min_total_distance = float('inf')
+    
+    for current_point in current_access_points:
+        dist_prev_to_current = abs(prev_access_point[0] - current_point[0]) + abs(prev_access_point[1] - current_point[1])
+        dist_current_to_next = abs(current_point[0] - next_target[0]) + abs(current_point[1] - next_target[1])
+        total_distance = dist_prev_to_current + dist_current_to_next
+        
+        if total_distance < min_total_distance:
+            min_total_distance = total_distance
+            best_point = current_point
+    
+    if best_point is None:
+        return get_best_access_point(current_pos_info, current_machine_def, obstacle_grid, factory_w, factory_h)
+    
     return best_point
 
 def a_star_search(grid_map, start_coords, goal_coords, factory_w, factory_h):
-    neighbors = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    neighbors = [(0, 1), (0, -1), (1, 0), (-1, 0)] 
+
     close_set = set()
     came_from = {}
     gscore = {start_coords: 0}
     fscore = {start_coords: heuristic(start_coords, goal_coords)}
-    oheap = [(fscore[start_coords], start_coords)]
+    oheap = [] 
+
+    heapq.heappush(oheap, (fscore[start_coords], start_coords))
+    
     while oheap:
-        _, current_node = heapq.heappop(oheap)
+        current_fscore, current_node = heapq.heappop(oheap)
+
         if current_node == goal_coords:
             path_data = []
             while current_node in came_from:
                 path_data.append(current_node)
                 current_node = came_from[current_node]
-            path_data.append(start_coords)
-            return path_data[::-1]
+            path_data.append(start_coords) 
+            return path_data[::-1] 
+
         close_set.add(current_node)
         for i, j in neighbors:
             neighbor = current_node[0] + i, current_node[1] + j
-            if not (0 <= neighbor[0] < factory_w and 0 <= neighbor[1] < factory_h) or grid_map[neighbor[0]][neighbor[1]] == 1:
+            
+            if not (0 <= neighbor[0] < factory_w and 0 <= neighbor[1] < factory_h):
                 continue
-            tentative_g_score = gscore[current_node] + 1
-            if tentative_g_score < gscore.get(neighbor, float('inf')):
+            if grid_map[neighbor[0]][neighbor[1]] == 1: 
+                continue
+                
+            tentative_g_score = gscore[current_node] + 1 
+
+            if neighbor in close_set and tentative_g_score >= gscore.get(neighbor, float('inf')):
+                continue
+                
+            if tentative_g_score < gscore.get(neighbor, float('inf')) or neighbor not in [item[1] for item in oheap]:
                 came_from[neighbor] = current_node
                 gscore[neighbor] = tentative_g_score
                 fscore[neighbor] = tentative_g_score + heuristic(neighbor, goal_coords)
                 heapq.heappush(oheap, (fscore[neighbor], neighbor))
-    return None
-
-# --- Visualization Functions ---
-def visualize_layout_plt(machine_positions_map, factory_w, factory_h, process_sequence_list, machine_definitions_list, zone_params):
-    fig, ax = plt.subplots(figsize=(factory_w/2.5, factory_h/2.5))
-    ax.set_xlim(-0.5, factory_w - 0.5); ax.set_ylim(-0.5, factory_h - 0.5)
-    ax.set_xticks(range(factory_w)); ax.set_yticks(range(factory_h))
-    ax.grid(True, linestyle='--', alpha=0.7); ax.set_aspect('equal', adjustable='box')
-
-    cmap = plt.colormaps.get_cmap('viridis')
-    machines_dict_by_id = {m['id']: m for m in machine_definitions_list}
-
-    # Draw Zone Constraint Boundary
-    zone_centers = [machine_positions_map[m_id] for m_id in zone_params['target_machines'] if m_id in machine_positions_map]
-    if len(zone_centers) > 1:
-        center_x_coords = [c['center_x'] for c in zone_centers]
-        center_y_coords = [c['center_y'] for c in zone_centers]
-        avg_cx, avg_cy = sum(center_x_coords) / len(zone_centers), sum(center_y_coords) / len(zone_centers)
-        required_radius = zone_params['max_spread_dist'] / 2.0
-        circle_required = patches.Circle((avg_cx - 0.5, avg_cy - 0.5), radius=required_radius,
-                                         linewidth=2, edgecolor='red', facecolor='none', linestyle='--',
-                                         alpha=0.6, label=f"Zone Max Spread ({zone_params['max_spread_dist']})")
-        ax.add_patch(circle_required)
-
-    # Draw Machines
-    for machine_id in process_sequence_list:
-        if machine_id in machine_positions_map:
-            pos_data = machine_positions_map[machine_id]
-            machine_info = machines_dict_by_id.get(machine_id)
-            if machine_info:
-                x, y, (w, h), clr = pos_data['x'], pos_data['y'], machine_info['footprint'], machine_info.get('clearance', 0)
-                color_val = machine_id / max(len(machine_definitions_list) - 1, 1)
-                rect_body = patches.Rectangle((x - 0.5, y - 0.5), w, h, linewidth=1.5, edgecolor='black', facecolor=cmap(color_val), alpha=0.8)
-                ax.add_patch(rect_body)
-                ax.text(x + w/2 - 0.5, y + h/2 - 0.5, f"M{machine_id}", ha='center', va='center', fontsize=8, color='white', weight='bold')
-                if clr > 0:
-                    rect_clearance = patches.Rectangle((x-clr-0.5, y-clr-0.5), w+2*clr, h+2*clr, linewidth=1, edgecolor=cmap(color_val), facecolor='none', linestyle=':', alpha=0.5)
-                    ax.add_patch(rect_clearance)
-
-    plt.title("Optimized Factory Layout (GA)", fontsize=14, weight='bold')
-    plt.xlabel("Factory Width (X)"); plt.ylabel("Factory Height (Y)")
-    ax.invert_yaxis()
-    return fig
+                
+    return None 
 
 def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
-    factory_w, factory_h = layout_data["factory_width"], layout_data["factory_height"]
-    machine_positions_map = {int(k): v for k, v in layout_data["machine_positions_map"].items()}
+    """Visualizes paths and heatmap. Returns two fig objects."""
+    factory_w = layout_data["factory_width"]
+    factory_h = layout_data["factory_height"]
+    machine_positions_map_str = layout_data["machine_positions_map"]
+    machine_positions_map = {int(k): v for k, v in machine_positions_map_str.items()}
+    process_sequence_list = layout_data["process_sequence"]
     machine_definitions_list = layout_data["machines_definitions"]
+
+    num_total_machines_for_color = len(machine_definitions_list)
+    cmap_machines = plt.colormaps.get_cmap('viridis')
     machines_dict_by_id = {m['id']: m for m in machine_definitions_list}
-    
-    # --- Figure 1: Path Overlay ---
-    fig_path, ax_path = plt.subplots(figsize=(factory_w/2.5, factory_h/2.5))
-    ax_path.set_xlim(-0.5, factory_w - 0.5); ax_path.set_ylim(-0.5, factory_h - 0.5)
-    ax_path.set_xticks(range(factory_w)); ax_path.set_yticks(range(factory_h))
-    ax_path.grid(True, linestyle='--', alpha=0.6)
+
+    # --- Visualization 1: Path Overlay ---
+    fig_path, ax_path = plt.subplots(1, figsize=(max(10, factory_w/2.5), max(10, factory_h/2.8))) 
+    ax_path.set_xlim(-0.5, factory_w - 0.5)
+    ax_path.set_ylim(-0.5, factory_h - 0.5)
+    ax_path.set_xticks(range(factory_w))
+    ax_path.set_yticks(range(factory_h))
+    ax_path.grid(True, linestyle='--', alpha=0.7)
     ax_path.set_aspect('equal', adjustable='box')
 
-    # Draw Machines
-    for machine_id, pos_data in machine_positions_map.items():
+    # Draw Machines for Path Plot
+    for machine_id, pos_data in machine_positions_map.items(): 
         machine_info = machines_dict_by_id.get(machine_id)
         if machine_info:
-            x, y, (w, h) = pos_data['x'], pos_data['y'], machine_info['footprint']
-            color_val = machine_id / max(len(machine_definitions_list) - 1, 1)
-            rect_body = patches.Rectangle((x - 0.5, y - 0.5), w, h, linewidth=1.5, edgecolor='black', facecolor=plt.cm.viridis(color_val), alpha=0.7)
-            ax_path.add_patch(rect_body)
-            ax_path.text(x + w/2 - 0.5, y + h/2 - 0.5, f"M{machine_id}", ha='center', va='center', fontsize=8, color='white', weight='bold')
+            x, y = pos_data['x'], pos_data['y']
+            width, height = machine_info['footprint']
+            clearance = machine_info.get('clearance', 0)
+            
+            normalized_id = machine_id / max(num_total_machines_for_color - 1, 1)
+            face_color = cmap_machines(normalized_id)
 
-    # Draw Paths
-    cmap_paths = plt.colormaps.get_cmap('cool')
+            rect_body = patches.Rectangle((x - 0.5, y - 0.5), width, height,
+                                          linewidth=1.5, edgecolor='black',
+                                          facecolor=face_color, alpha=0.7)
+            ax_path.add_patch(rect_body)
+            ax_path.text(x + width/2 - 0.5, y + height/2 - 0.5, f"M{machine_id}",
+                         ha='center', va='center', fontsize=7, color='white', weight='bold')
+
+    # Draw Paths for Path Plot
+    cmap_paths = plt.colormaps.get_cmap('cool') 
+    num_paths = len(all_paths)
+    path_number = 1
+    labels_at_start_node = {}
     for i, path_segment in enumerate(all_paths):
         if path_segment:
-            path_color = cmap_paths(i / max(len(all_paths) - 1, 1))
-            path_xs, path_ys = [p[0] for p in path_segment], [p[1] for p in path_segment]
-            ax_path.plot(path_xs, path_ys, color=path_color, linewidth=2.5, alpha=0.9, marker='o', markersize=3, label=f'Path {i+1}')
+            path_color = cmap_paths(i / max(num_paths - 1, 1))
+            path_xs = [p[0] for p in path_segment]
+            path_ys = [p[1] for p in path_segment]
+            ax_path.plot(path_xs, path_ys, color=path_color, linewidth=2, alpha=0.8, marker='o', markersize=3)
+            
+            if len(path_segment) > 0:
+                start_node_tuple = tuple(path_segment[0]) 
 
-    ax_path.set_title("Material Flow Paths (A*)", fontsize=14, weight='bold')
-    ax_path.set_xlabel("Factory Width (X)"); ax_path.set_ylabel("Factory Height (Y)")
-    ax_path.invert_yaxis()
+                offset_idx = labels_at_start_node.get(start_node_tuple, 0)
+                adjusted_y_pos = path_segment[0][1] - 0.3 - (offset_idx * 1)
+                adjusted_x_pos = path_segment[0][0] 
 
-    # --- Figure 2: Congestion Heatmap ---
-    fig_heat, ax_heat = plt.subplots(figsize=(factory_w/2.5, factory_h/2.5))
-    ax_heat.set_xlim(-0.5, factory_w - 0.5); ax_heat.set_ylim(-0.5, factory_h - 0.5)
-    ax_heat.set_xticks(range(factory_w)); ax_heat.set_yticks(range(factory_h))
-    ax_heat.grid(False)
+                ax_path.text(adjusted_x_pos, adjusted_y_pos, f"{path_number}",
+                             color=path_color,
+                             fontsize=10,
+                             weight='bold',
+                             bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray', pad=0.2, boxstyle='round'))
+
+                labels_at_start_node[start_node_tuple] = offset_idx + 1
+                path_number += 1
+
+    ax_path.set_title("Factory Layout with Optimized Continuous Paths", fontsize=14)
+    ax_path.set_xlabel("Factory Width (X)")
+    ax_path.set_ylabel("Factory Height (Y)")
+    ax_path.invert_yaxis() 
+
+    # --- Visualization 2: Congestion Heatmap ---
+    fig_heat, ax_heat = plt.subplots(1, figsize=(max(10, factory_w/2.5), max(10, factory_h/2.8))) 
+    ax_heat.set_xlim(-0.5, factory_w - 0.5)
+    ax_heat.set_ylim(-0.5, factory_h - 0.5)
+    ax_heat.set_xticks(range(factory_w))
+    ax_heat.set_yticks(range(factory_h))
+    ax_heat.grid(True, linestyle='--', alpha=0.7)
     ax_heat.set_aspect('equal', adjustable='box')
-    
-    flow_density_grid_transposed = [list(row) for row in zip(*flow_density_grid)]
-    max_flow = max(max(row) for row in flow_density_grid) if any(any(row) for row in flow_density_grid) else 1
-    colors = [(0,0,0,0), (0.1, 0.7, 0.1, 0.5), (1, 0.5, 0, 0.8), (1, 0, 0, 1)]
-    cmap_custom = LinearSegmentedColormap.from_list("flow_cmap", colors)
-    im = ax_heat.imshow(flow_density_grid_transposed, cmap=cmap_custom, interpolation='nearest', origin='lower', extent=[-0.5, factory_w-0.5, -0.5, factory_h-0.5], vmax=max_flow)
-    cbar = fig_heat.colorbar(im, ax=ax_heat, fraction=0.046, pad=0.04)
-    cbar.set_label('Material Flow Density (Path Overlaps)')
+    ax_heat.invert_yaxis() 
 
-    for machine_id, pos_data in machine_positions_map.items():
+    max_flow = max(max(row) for row in flow_density_grid) if flow_density_grid and any(any(row) for row in flow_density_grid) else 1
+    flow_density_grid_transposed = [list(row) for row in zip(*flow_density_grid)]
+
+    # Draw Heatmap
+    if max_flow > 0:
+        colors = [(0, 0, 0, 0), (0.1, 0.7, 0.1, 0.5), (1, 0.5, 0, 0.8), (1, 0, 0, 1)] 
+        cmap_custom = LinearSegmentedColormap.from_list("flow_cmap", colors)
+        
+        im = ax_heat.imshow(flow_density_grid_transposed, cmap=cmap_custom, 
+                            interpolation='nearest', origin='lower', extent=[-0.5, factory_w-0.5, -0.5, factory_h-0.5],
+                            vmax=max_flow)
+        
+        cbar = fig_heat.colorbar(im, ax=ax_heat, fraction=0.046, pad=0.04)
+        cbar.set_label('Material Flow Density (Path Overlaps)')
+
+    # Draw Machines for Heatmap Plot
+    for machine_id, pos_data in machine_positions_map.items(): 
         machine_info = machines_dict_by_id.get(machine_id)
         if machine_info:
-            x, y, (w, h) = pos_data['x'], pos_data['y'], machine_info['footprint']
-            rect_body = patches.Rectangle((x-0.5, y-0.5), w, h, linewidth=1.5, edgecolor='black', facecolor='gray', alpha=0.5)
+            x, y = pos_data['x'], pos_data['y']
+            width, height = machine_info['footprint']
+            normalized_id = machine_id / max(num_total_machines_for_color - 1, 1)
+            face_color = cmap_machines(normalized_id)
+
+            rect_body = patches.Rectangle((x - 0.5, y - 0.5), width, height,
+                                          linewidth=1.5, edgecolor='black',
+                                          facecolor=face_color, alpha=0.7)
             ax_heat.add_patch(rect_body)
-            ax_heat.text(x + w/2 - 0.5, y + h/2 - 0.5, f"M{machine_id}", ha='center', va='center', fontsize=8, color='white', weight='bold')
+            ax_heat.text(x + width/2 - 0.5, y + height/2 - 0.5, f"M{machine_id}",
+                         ha='center', va='center', fontsize=7, color='white', weight='bold')
 
-    ax_heat.set_title("Factory Congestion Heatmap", fontsize=14, weight='bold')
-    ax_heat.set_xlabel("Factory Width (X)"); ax_heat.set_ylabel("Factory Height (Y)")
-    ax_heat.invert_yaxis()
 
+    ax_heat.set_title("Factory Congestion Heatmap (A* Flow Analysis)", fontsize=14)
+    ax_heat.set_xlabel("Factory Width (X)")
+    ax_heat.set_ylabel("Factory Height (Y)")
+    ax_heat.invert_yaxis() 
+    
     return fig_path, fig_heat
 
-def generate_performance_plots(logs, target_tph, area_util_min_thresh):
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
-    axes = axes.flatten()
-
-    # Plot 1: Fitness
-    axes[0].plot(logs['best_fitness'], label='Best Fitness', color='blue')
-    axes[0].plot(logs['avg_fitness'], label='Average Fitness', color='cyan', linestyle='--')
-    axes[0].set_title('GA Fitness Progress'); axes[0].set_xlabel('Generation'); axes[0].set_ylabel('Fitness')
-    axes[0].legend(); axes[0].grid(True, alpha=0.5)
-
-    # Plot 2: Distance
-    plot_distances = [d if d != float('inf') else None for d in logs['best_distance']]
-    axes[1].plot(plot_distances, label='Best Euclidean Distance', color='green')
-    axes[1].set_title('Best Individual Distance'); axes[1].set_xlabel('Generation'); axes[1].set_ylabel('Total Distance')
-    axes[1].legend(); axes[1].grid(True, alpha=0.5)
-
-    # Plot 3: Throughput
-    axes[2].plot(logs['best_throughput'], label='Best Throughput (TPH)', color='red')
-    axes[2].axhline(y=target_tph, color='gray', linestyle=':', label=f'Target TPH ({target_tph})')
-    axes[2].set_title('Best Individual Throughput'); axes[2].set_xlabel('Generation'); axes[2].set_ylabel('Throughput')
-    axes[2].legend(); axes[2].grid(True, alpha=0.5)
-
-    # Plot 4: Valid Ratio
-    axes[3].plot(logs['valid_ratio'], label='Valid Individuals (%)', color='purple')
-    axes[3].set_title('Valid Individuals Ratio'); axes[3].set_xlabel('Generation'); axes[3].set_ylabel('Ratio (%)'); axes[3].set_ylim(0, 105)
-    axes[3].legend(); axes[3].grid(True, alpha=0.5)
+def generate_performance_summary(ga_metrics, a_star_metrics, process_sequence, machines_defs, target_tph):
+    """This function is designed to be captured by redirect_stdout."""
     
-    # Plot 5: Zone Penalty
-    axes[4].plot(logs['best_zone_penalty'], label='Zone Penalty (Best)', color='orange')
-    axes[4].set_title('Zone Proximity Penalty'); axes[4].set_xlabel('Generation'); axes[4].set_ylabel('Penalty Value')
-    axes[4].legend(); axes[4].grid(True, alpha=0.5)
+    machine_util_data_str = ga_metrics.get("machine_utilization", {})
+    machine_util_data = {int(k): v for k, v in machine_util_data_str.items()} 
     
-    # Plot 6: Area Utilization
-    axes[5].plot([r * 100 for r in logs['best_utilization']], label='Area Utilization (Best)', color='brown')
-    axes[5].axhline(y=area_util_min_thresh * 100, color='gray', linestyle=':', label=f'Target Min ({area_util_min_thresh*100:.0f}%)')
-    axes[5].set_title('Area Utilization Ratio'); axes[5].set_xlabel('Generation'); axes[5].set_ylabel('Utilization (%)')
-    axes[5].legend(); axes[5].grid(True, alpha=0.5)
+    util_rows = []
+    machines_dict = {m['id']: m for m in machines_defs}
+    
+    bottleneck_mid = None
+    max_util = 0.0
+    
+    for mid in process_sequence:
+        name = machines_dict.get(mid, {}).get("name", "N/A")
+        util = machine_util_data.get(mid, 0.0)
+        cycle_time = machines_dict.get(mid, {}).get("cycle_time", 0)
+        
+        util_rows.append((mid, name, cycle_time, util * 100))
+        
+        if util > max_util:
+            max_util = util
+            bottleneck_mid = mid
 
+    print("\n" + "="*80)
+    print(f"{'FACTORY LAYOUT OPTIMIZATION SUMMARY':^80}")
+    print("="*80)
+    print(f"{'Metric':<35} | {'GA Value':<20} | {'A* Flow Value':<20}")
+    print("-" * 80)
+    print(f"{'Best Fitness Score (GA)':<35} | {ga_metrics.get('fitness', 0.0):<20.2f} | {'-':<20}")
+    print(f"{'Hourly Throughput (TPH)':<35} | {ga_metrics.get('throughput', 0.0):<20.2f} | {'-':<20}")
+    print(f"{'Target TPH':<35} | {target_tph:<20.0f} | {'-':<20}")
+    print(f"{'Total Distance (Euclidean)':<35} | {ga_metrics.get('distance', 0.0):<20.2f} | {'-':<20}")
+    print(f"{'Total Flow Distance (A*)':<35} | {'-':<20} | {a_star_metrics.get('total_a_star_distance', 0.0):<20.1f}")
+    print(f"{'Total Travel Time (A* Flow)':<35} | {'-':<20} | {a_star_metrics.get('total_a_star_time_seconds', 0.0):<20.2f}")
+    print(f"{'Area Utilization Ratio':<35} | {ga_metrics.get('utilization_ratio', 0.0)*100:<20.2f}% | {'-':<20}")
+    print(f"{'Zone 1 Proximity Penalty':<35} | {ga_metrics.get('zone_penalty', 0.0):<20.2f} | {'-':<20}")
+    print("-" * 80)
+    
+    print(f"\n{'MACHINE UTILIZATION ANALYSIS':^80}")
+    print("-" * 80)
+    print(f"{'ID':<4} | {'Name':<30} | {'Cycle Time (s)':<15} | {'Utilization Rate':<20}")
+    print("-" * 80)
+    
+    for mid, name, cycle_time, util_rate in util_rows:
+        highlight = " 🌟 BOTTLENECK" if mid == bottleneck_mid else ""
+        print(f"M{mid:<3} | {name:<30} | {cycle_time:<15} | {util_rate:<19.2f}%{highlight}")
+    print("="*80 + "\n")
+
+def run_pathfinding_analysis(layout_data, material_travel_speed):
+    """Loads GA results from memory, calculates A* paths, and returns metrics/visuals."""
+    
+    f = io.StringIO()
+    with redirect_stdout(f):
+        try:
+            factory_w = layout_data["factory_width"]
+            factory_h = layout_data["factory_height"]
+            machine_positions_str = layout_data["machine_positions_map"]
+            machine_positions = {int(k): v for k, v in machine_positions_str.items()}
+            process_sequence = layout_data["process_sequence"]
+            machines_definitions = layout_data["machines_definitions"]
+            machines_dict = {m['id']: m for m in machines_definitions}
+            ga_metrics = layout_data["final_metrics"]
+
+            obstacle_grid = [[0 for _ in range(factory_h)] for _ in range(factory_w)]
+            for machine_id_str, pos_info in machine_positions_str.items():
+                machine_id = int(machine_id_str)
+                m_def = machines_dict.get(machine_id)
+                if m_def:
+                    footprint_w, footprint_h = m_def["footprint"]
+                    start_x, start_y = pos_info["x"], pos_info["y"]
+                    for i in range(start_x, start_x + footprint_w):
+                        for j in range(start_y, start_y + footprint_h):
+                            if 0 <= i < factory_w and 0 <= j < factory_h:
+                                obstacle_grid[i][j] = 1 
+
+            print("\n🚀 Starting Single-Stroke Continuous Path Optimization...")
+            all_paths_found = []
+            access_points_cache = {} 
+            
+            flow_density_grid = [[0 for _ in range(factory_h)] for _ in range(factory_w)]
+            total_a_star_distance = 0
+            total_a_star_time = 0
+
+            first_machine_id = process_sequence[0]
+            first_pos_info = machine_positions.get(first_machine_id)
+            first_machine_def = machines_dict.get(first_machine_id)
+            if first_pos_info and first_machine_def:
+                access_points_cache[first_machine_id] = get_best_access_point(
+                    first_pos_info, first_machine_def, obstacle_grid, factory_w, factory_h)
+            
+            print("\n--- A* Path Segment Analysis ---")
+            print(f"{'Segment':<15} | {'Start Node':<12} | {'Goal Node':<12} | {'A* Distance':<15} | {'Travel Time (s)':<15}")
+            print("-" * 70)
+
+            for i in range(len(process_sequence) - 1):
+                current_machine_id = process_sequence[i]
+                next_machine_id = process_sequence[i+1]
+
+                current_pos_info = machine_positions.get(current_machine_id)
+                next_pos_info = machine_positions.get(next_machine_id)
+                current_machine_def = machines_dict.get(current_machine_id)
+                next_machine_def = machines_dict.get(next_machine_id)
+
+                if not current_pos_info or not next_pos_info or not current_machine_def or not next_machine_def:
+                    all_paths_found.append(None); continue
+
+                start_node = access_points_cache.get(current_machine_id)
+                if start_node is None:
+                    start_node = get_best_access_point(current_pos_info, current_machine_def, obstacle_grid, factory_w, factory_h)
+                    access_points_cache[current_machine_id] = start_node
+                
+                if i < len(process_sequence) - 2: 
+                    next_next_machine_id = process_sequence[i+2]
+                    next_next_pos_info = machine_positions.get(next_next_machine_id)
+                    next_next_machine_def = machines_dict.get(next_next_machine_id)
+                    
+                    if next_next_pos_info and next_next_machine_def:
+                        goal_node = get_optimized_access_point_for_sequence(
+                            start_node, next_pos_info, next_machine_def,
+                            next_next_pos_info, next_next_machine_def,
+                            obstacle_grid, factory_w, factory_h)
+                        access_points_cache[next_machine_id] = goal_node
+                    else:
+                        goal_node = get_best_access_point(next_pos_info, next_machine_def, obstacle_grid, factory_w, factory_h)
+                        access_points_cache[next_machine_id] = goal_node
+                else: # Last segment
+                    goal_node = get_best_access_point(next_pos_info, next_machine_def, obstacle_grid, factory_w, factory_h)
+                    access_points_cache[next_machine_id] = goal_node
+                
+                path = a_star_search(obstacle_grid, start_node, goal_node, factory_w, factory_h)
+                a_star_dist = 0
+                travel_time = 0
+                
+                if path:
+                    all_paths_found.append(path)
+                    a_star_dist = len(path) - 1
+                    travel_time = a_star_dist / material_travel_speed
+                    
+                    for x, y in path:
+                        if 0 <= x < factory_w and 0 <= y < factory_h and obstacle_grid[x][y] == 0:
+                            flow_density_grid[x][y] += 1
+                else:
+                    all_paths_found.append([start_node, goal_node])
+                    a_star_dist = abs(start_node[0] - goal_node[0]) + abs(start_node[1] - goal_node[1]) 
+                    travel_time = a_star_dist / material_travel_speed
+                    
+                total_a_star_distance += a_star_dist
+                total_a_star_time += travel_time
+                
+                print(f"M{current_machine_id} -> M{next_machine_id:<7} | {str(start_node):<12} | {str(goal_node):<12} | {a_star_dist:<15.1f} | {travel_time:<15.2f}")
+
+            print("-" * 70)
+            print(f"{'A* Totals':<30} | {'':<12} | {'Total A* Distance':<15} | {total_a_star_distance:<15.1f}")
+            print(f"{'':<30} | {'':<12} | {'Total Flow Time (s)':<15} | {total_a_star_time:<15.2f}")
+            print("\n🎨 Visualizing Single-Stroke Optimization Result and Congestion Heatmap...")
+
+            a_star_metrics = {
+                "total_a_star_distance": total_a_star_distance,
+                "total_a_star_time_seconds": total_a_star_time
+            }
+
+            # Generate visualizations
+            fig_path, fig_heat = visualize_layout_with_paths(layout_data, all_paths_found, flow_density_grid)
+            
+            # Generate final summary text
+            summary_text = io.StringIO()
+            with redirect_stdout(summary_text):
+                generate_performance_summary(ga_metrics, a_star_metrics, process_sequence, machines_definitions, layout_data["target_tph"])
+            
+            return {
+                "a_star_metrics": a_star_metrics,
+                "fig_path": fig_path,
+                "fig_heat": fig_heat,
+                "a_star_log": f.getvalue(),
+                "summary_log": summary_text.getvalue()
+            }
+
+        except Exception as e:
+            st.error(f"Error during A* Pathfinding: {e}")
+            print(f"Error during A* Pathfinding: {e}")
+            return {
+                "a_star_metrics": {}, "fig_path": None, "fig_heat": None, 
+                "a_star_log": f.getvalue(), "summary_log": ""
+            }
+
+def generate_analysis_plots(logs, target_tph, target_util_thresh):
+    """Generates the 6-panel GA performance plot. Returns a fig object."""
+    fig, axs = plt.subplots(2, 3, figsize=(18, 10))
+    
+    # 1. Fitness Progress
+    axs[0, 0].plot(logs['best_fitness'], label='Best Fitness', color='blue')
+    axs[0, 0].plot(logs['avg_fitness'], label='Average Fitness (Valid)', color='cyan', linestyle='--')
+    axs[0, 0].set_xlabel('Generation'); axs[0, 0].set_ylabel('Fitness')
+    axs[0, 0].set_title('GA Fitness Progress'); axs[0, 0].legend(fontsize=8); axs[0, 0].grid(True, linestyle=':', alpha=0.7)
+
+    # 2. Total Distance
+    plot_distances = [d if d != float('inf') else max(filter(lambda x: x!=float('inf'), logs['best_distance']), default=1000)*1.1 for d in logs['best_distance']]
+    if not any(d != float('inf') for d in logs['best_distance']) and logs['best_distance']: plot_distances = [0] * len(logs['best_distance']) 
+    axs[0, 1].plot(plot_distances, label='Best Individual Euclidean Distance', color='green')
+    axs[0, 1].set_xlabel('Generation'); axs[0, 1].set_ylabel('Total Distance')
+    axs[0, 1].set_title('Best Individual Distance'); axs[0, 1].legend(fontsize=8); axs[0, 1].grid(True, linestyle=':', alpha=0.7)
+    if any(d == float('inf') for d in logs['best_distance']): axs[0, 1].text(0.05, 0.95, "Note: 'inf' distances capped", transform=axs[0, 1].transAxes, fontsize=8, verticalalignment='top')
+
+    # 3. Throughput vs. Target
+    axs[0, 2].plot(logs['best_throughput'], label='Best Individual Throughput', color='red')
+    axs[0, 2].axhline(y=target_tph, color='gray', linestyle=':', label=f'Target TPH ({target_tph})')
+    axs[0, 2].set_xlabel('Generation'); axs[0, 2].set_ylabel('Throughput')
+    axs[0, 2].set_title('Best Individual Throughput'); axs[0, 2].legend(fontsize=8); axs[0, 2].grid(True, linestyle=':', alpha=0.7)
+
+    # 4. Valid Individuals Ratio
+    axs[1, 0].plot(logs['valid_ratio'], label='Valid Individuals Ratio (%)', color='purple')
+    axs[1, 0].set_xlabel('Generation'); axs[1, 0].set_ylabel('Valid Ratio (%)'); axs[1, 0].set_ylim(0, 105)
+    axs[1, 0].set_title('Valid Individuals Ratio'); axs[1, 0].legend(fontsize=8); axs[1, 0].grid(True, linestyle=':', alpha=0.7)
+
+    # 5. Zone Constraint Penalty
+    axs[1, 1].plot(logs['best_zone_penalty'], label='Zone Constraint Penalty (Best)', color='orange')
+    axs[1, 1].set_xlabel('Generation'); axs[1, 1].set_ylabel('Penalty Value'); 
+    axs[1, 1].set_title('Zone Proximity Penalty'); axs[1, 1].legend(fontsize=8); axs[1, 1].grid(True, linestyle=':', alpha=0.7)
+
+    # 6. Area Utilization Ratio
+    axs[1, 2].plot([r * 100 for r in logs['best_utilization']], label='Area Utilization (Best)', color='brown')
+    axs[1, 2].axhline(y=target_util_thresh * 100, color='gray', linestyle=':', label=f'Target Min ({target_util_thresh*100:.0f}%)')
+    axs[1, 2].set_xlabel('Generation'); axs[1, 2].set_ylabel('Utilization (%)'); 
+    axs[1, 2].set_title('Area Utilization Ratio'); axs[1, 2].legend(fontsize=8); axs[1, 2].grid(True, linestyle=':', alpha=0.7)
+    
     plt.tight_layout()
     return fig
 
-# --- Main Application Logic ---
-def run_genetic_algorithm(params, machines_defs_ordered_by_proc_seq, process_sequence, status_placeholder):
-    population = [create_individual(machines_defs_ordered_by_proc_seq, params['factory_w'], params['factory_h']) for _ in range(params['pop_size'])]
+# ----------------------------------------------------------------------------------------------------
+# --------------------------------- MAIN STREAMLIT FUNCTION ------------------------------------------
+# ----------------------------------------------------------------------------------------------------
+
+def run_optimization_process(factory_w, factory_h, target_tph, material_travel_speed,
+                             ga_params, fitness_weights, constraint_params,
+                             machines_definitions, process_sequence,
+                             progress_placeholder, status_text):
+    
+    status_text.text("Preparing for optimization...")
+    
+    machines_for_ga_processing_order = [next(m for m in machines_definitions if m["id"] == pid) for pid in process_sequence]
+    
+    status_text.text(f"Generating initial population (Size: {ga_params['population_size']})...")
+    population = [create_individual(machines_for_ga_processing_order, factory_w, factory_h) for _ in range(ga_params['population_size'])]
+    status_text.text("Initial population generation complete.")
     
     best_overall_fitness = -float('inf')
     best_overall_chromosome = None
-    best_overall_metrics = {}
+    best_overall_metrics = {} 
     
+    # Loggers for analysis plots
     logs = {
-        'best_fitness': [], 'avg_fitness': [], 'best_distance': [], 'best_throughput': [],
-        'valid_ratio': [], 'best_zone_penalty': [], 'best_utilization': []
+        'best_fitness': [], 'avg_fitness': [], 'best_distance': [],
+        'best_throughput': [], 'valid_ratio': [], 'best_zone_penalty': [],
+        'best_utilization': []
     }
-    
-    progress_bar = status_placeholder.progress(0)
-    log_area = status_placeholder.expander("Show Generation Logs", expanded=False)
 
-    for generation in range(1, params['num_generations'] + 1):
+    num_generations = ga_params['num_generations']
+    for generation in range(1, num_generations + 1):
+
         all_eval_results = []
         current_gen_total_fitness = 0
-        current_gen_valid_count = 0
-        
+        current_gen_valid_individuals_count = 0
+
         for chromo in population:
             eval_dict = calculate_fitness(
-                chromo, machines_defs_ordered_by_proc_seq, process_sequence,
-                params['factory_w'], params['factory_h'], params['target_tph'], params['travel_speed'],
-                params['seconds_per_hour'], params['weights'], params['bonus_factor'],
-                params['zone_params'], params['area_util_min_thresh']
+                chromo, machines_for_ga_processing_order, process_sequence,
+                factory_w, factory_h, target_tph, material_travel_speed,
+                machines_definitions, fitness_weights, constraint_params
             )
             all_eval_results.append((chromo, eval_dict))
             if eval_dict["is_valid"]:
                 current_gen_total_fitness += eval_dict["fitness"]
-                current_gen_valid_count += 1
+                current_gen_valid_individuals_count += 1
         
-        if not all_eval_results: break
-        
+        if not all_eval_results:
+            st.error(f"Generation {generation}: No evaluation results! Algorithm halted.")
+            break
+
         current_gen_best_item = max(all_eval_results, key=lambda item: item[1]['fitness'])
+        current_gen_best_chromosome = current_gen_best_item[0]
         current_gen_best_eval_dict = current_gen_best_item[1]
         
-        logs['best_fitness'].append(current_gen_best_eval_dict['fitness'])
+        current_gen_best_fitness = current_gen_best_eval_dict['fitness']
+        
+        # Update logs
+        logs['best_fitness'].append(current_gen_best_fitness)
         logs['best_distance'].append(current_gen_best_eval_dict['distance'])
         logs['best_throughput'].append(current_gen_best_eval_dict['throughput'])
-        logs['best_zone_penalty'].append(current_gen_best_eval_dict['zone_penalty'])
-        logs['best_utilization'].append(current_gen_best_eval_dict['utilization_ratio'])
-        
-        valid_ratio = (current_gen_valid_count / params['pop_size']) * 100
+        logs['best_zone_penalty'].append(current_gen_best_eval_dict.get('zone_penalty', 0.0))
+        logs['best_utilization'].append(current_gen_best_eval_dict.get('utilization_ratio', 0.0))
+
+        valid_ratio = (current_gen_valid_individuals_count / ga_params['population_size']) * 100 if ga_params['population_size'] > 0 else 0
         logs['valid_ratio'].append(valid_ratio)
         
-        avg_fitness = current_gen_total_fitness / current_gen_valid_count if current_gen_valid_count > 0 else -float('inf')
-        logs['avg_fitness'].append(avg_fitness)
+        current_gen_avg_fitness = (current_gen_total_fitness / current_gen_valid_individuals_count) if current_gen_valid_individuals_count > 0 else -float('inf')
+        logs['avg_fitness'].append(current_gen_avg_fitness)
 
-        if current_gen_best_eval_dict['fitness'] > best_overall_fitness:
-            best_overall_fitness = current_gen_best_eval_dict['fitness']
-            best_overall_chromosome = current_gen_best_item[0]
-            best_overall_metrics = copy.deepcopy(current_gen_best_eval_dict)
+        if current_gen_best_fitness > best_overall_fitness:
+            best_overall_fitness = current_gen_best_fitness
+            best_overall_chromosome = current_gen_best_chromosome
+            best_overall_metrics = copy.deepcopy(current_gen_best_eval_dict) 
+            status_text.text(
+                f"🌟 Generation {generation}: New best fitness! {best_overall_fitness:.2f} "
+                f"(Dist: {best_overall_metrics['distance']:.2f}, "
+                f"TPH: {best_overall_metrics['throughput']:.2f}, "
+                f"ZonePen: {best_overall_metrics['zone_penalty']:.2f})"
+            )
         
-        status_placeholder.text(f"🚀 Generation {generation}/{params['num_generations']} | Best Fitness: {best_overall_fitness:.2f}")
-        log_area.write(f"Gen {generation}: Best Fitness={current_gen_best_eval_dict['fitness']:.2f}, Avg Fitness={avg_fitness:.2f}, Valid={valid_ratio:.1f}%")
-        progress_bar.progress(generation / params['num_generations'])
-
-        # Create next generation
+        progress_placeholder.text(
+            f"Generation {generation}/{num_generations} - "
+            f"BestF: {current_gen_best_fitness:.2f}, "
+            f"AvgF: {current_gen_avg_fitness:.2f}, "
+            f"ValidRatio: {valid_ratio:.1f}%"
+        )
+        
+        # --- Genetic Operators ---
         new_population = []
         all_eval_results.sort(key=lambda item: item[1]['fitness'], reverse=True)
-        for i in range(params['elitism_count']):
+        for i in range(ga_params['elitism_count']):
             if i < len(all_eval_results) and all_eval_results[i][1]["is_valid"]:
                 new_population.append(all_eval_results[i][0])
+
+        num_offspring_to_generate = ga_params['population_size'] - len(new_population)
+        eligible_parents_for_selection = [item for item in all_eval_results if item[1]["is_valid"]]
+        if not eligible_parents_for_selection: eligible_parents_for_selection = all_eval_results 
+
+        current_offspring_count = 0
+        while current_offspring_count < num_offspring_to_generate:
+            if not eligible_parents_for_selection: break
+            parent1_chromo = selection(eligible_parents_for_selection, ga_params['tournament_size'])
+            parent2_chromo = selection(eligible_parents_for_selection, ga_params['tournament_size'])
+            
+            if parent1_chromo is None or parent2_chromo is None: 
+                if eligible_parents_for_selection:
+                    if parent1_chromo is None: parent1_chromo = random.choice(eligible_parents_for_selection)[0]
+                    if parent2_chromo is None: parent2_chromo = random.choice(eligible_parents_for_selection)[0]
+                else: 
+                    break
+
+            child1_chromo, child2_chromo = crossover(parent1_chromo, parent2_chromo, ga_params['crossover_rate'])
+            if random.random() < ga_params['mutation_rate']: child1_chromo = mutate(child1_chromo, machines_for_ga_processing_order, factory_w, factory_h, mutation_rate_per_gene=0.05)
+            if random.random() < ga_params['mutation_rate']: child2_chromo = mutate(child2_chromo, machines_for_ga_processing_order, factory_w, factory_h, mutation_rate_per_gene=0.05)
+            new_population.append(child1_chromo); current_offspring_count +=1
+            if current_offspring_count < num_offspring_to_generate: new_population.append(child2_chromo); current_offspring_count +=1
         
-        eligible_parents = [item for item in all_eval_results if item[1]["is_valid"]]
-        if not eligible_parents: eligible_parents = all_eval_results
+        while len(new_population) < ga_params['population_size']:
+            new_population.append(create_individual(machines_for_ga_processing_order, factory_w, factory_h))
+        population = new_population[:ga_params['population_size']]
 
-        while len(new_population) < params['pop_size']:
-            if not eligible_parents: break
-            parent1 = selection(eligible_parents, params['tournament_size'])
-            parent2 = selection(eligible_parents, params['tournament_size'])
-            if parent1 is None or parent2 is None:
-                parent1 = random.choice(eligible_parents)[0]
-                parent2 = random.choice(eligible_parents)[0]
-            
-            child1, child2 = crossover(parent1, parent2, params['crossover_rate'])
-            if random.random() < params['mutation_rate']:
-                child1 = mutate(child1, machines_defs_ordered_by_proc_seq, params['factory_w'], params['factory_h'], 0.05)
-            if random.random() < params['mutation_rate']:
-                child2 = mutate(child2, machines_defs_ordered_by_proc_seq, params['factory_w'], params['factory_h'], 0.05)
-            
-            new_population.append(child1)
-            if len(new_population) < params['pop_size']:
-                new_population.append(child2)
-
-        population = new_population
-
-    return best_overall_chromosome, best_overall_metrics, logs
-
-def run_pathfinding_analysis(ga_results, params):
-    factory_w, factory_h = params['factory_w'], params['factory_h']
-    machine_positions = {int(k): v for k, v in ga_results['machine_positions_map'].items()}
-    process_sequence = ga_results['process_sequence']
-    machines_definitions = ga_results['machines_definitions']
-    machines_dict = {m['id']: m for m in machines_definitions}
+    # --- Final GA Result Processing ---
+    status_text.text("Genetic Algorithm finished. Preparing final results...")
     
-    obstacle_grid = [[0] * factory_h for _ in range(factory_w)]
-    for m_id, pos in machine_positions.items():
-        m_def = machines_dict.get(m_id)
-        if m_def:
-            for i in range(pos['x'], pos['x'] + m_def['footprint'][0]):
-                for j in range(pos['y'], pos['y'] + m_def['footprint'][1]):
-                    if 0 <= i < factory_w and 0 <= j < factory_h:
-                        obstacle_grid[i][j] = 1
+    if not best_overall_chromosome or not best_overall_metrics.get("is_valid"):
+        st.error("Did not find a valid optimal layout.")
+        return None
 
-    all_paths_found = []
-    access_points_cache = {}
-    flow_density_grid = [[0] * factory_h for _ in range(factory_w)]
-    total_a_star_distance = 0
-    total_a_star_time = 0
+    final_grid_layout = initialize_layout_grid(factory_w, factory_h)
+    final_machine_positions_map = {}
+    
+    for i, machine_def_item in enumerate(machines_for_ga_processing_order):
+        pos_x_final, pos_y_final = best_overall_chromosome[i]
+        place_machine_on_grid(final_grid_layout, machine_def_item["id"], machine_def_item["footprint"], pos_x_final, pos_y_final)
+        final_machine_positions_map[machine_def_item["id"]] = {
+            "x": pos_x_final, "y": pos_y_final,
+            "center_x": pos_x_final + machine_def_item["footprint"][0] / 2.0,
+            "center_y": pos_y_final + machine_def_item["footprint"][1] / 2.0,
+        }
+    
+    # Capture layout text
+    layout_log_io = io.StringIO()
+    with redirect_stdout(layout_log_io):
+        print_layout(final_grid_layout, final_machine_positions_map, factory_w, factory_h, process_sequence, machines_definitions)
+    layout_log = layout_log_io.getvalue()
+    
+    # Generate GA layout visualization
+    fig_ga_layout = visualize_layout_plt(
+        final_grid_layout, final_machine_positions_map,
+        factory_w, factory_h, process_sequence,
+        machines_definitions, constraint_params
+    )
+    
+    # Generate GA performance graphs
+    fig_ga_analysis = generate_analysis_plots(logs, target_tph, constraint_params['area_util_min_threshold'])
 
-    for i in range(len(process_sequence) - 1):
-        curr_id, next_id = process_sequence[i], process_sequence[i+1]
-        curr_pos, next_pos = machine_positions.get(curr_id), machine_positions.get(next_id)
-        curr_def, next_def = machines_dict.get(curr_id), machines_dict.get(next_id)
-        if not (curr_pos and next_pos and curr_def and next_def): continue
-
-        start_node = access_points_cache.get(curr_id)
-        if start_node is None:
-            start_node = get_best_access_point(curr_pos, curr_def, obstacle_grid, factory_w, factory_h)
-            access_points_cache[curr_id] = start_node
-        
-        # Determine goal node with look-ahead optimization
-        if i < len(process_sequence) - 2:
-            next_next_id = process_sequence[i+2]
-            next_next_pos = machine_positions.get(next_next_id)
-            next_next_def = machines_dict.get(next_next_id)
-            if next_next_pos and next_next_def:
-                goal_node = get_optimized_access_point_for_sequence(start_node, next_pos, next_def, next_next_pos, next_next_def, obstacle_grid, factory_w, factory_h)
-            else:
-                goal_node = get_best_access_point(next_pos, next_def, obstacle_grid, factory_w, factory_h)
-        else: # Last segment
-            goal_node = get_best_access_point(next_pos, next_def, obstacle_grid, factory_w, factory_h)
-        access_points_cache[next_id] = goal_node
-
-        path = a_star_search(obstacle_grid, start_node, goal_node, factory_w, factory_h)
-        if path:
-            all_paths_found.append(path)
-            dist = len(path) - 1
-            total_a_star_distance += dist
-            total_a_star_time += dist / params['travel_speed']
-            for x, y in path:
-                if 0 <= x < factory_w and 0 <= y < factory_h:
-                    flow_density_grid[x][y] += 1
-        else:
-            all_paths_found.append([start_node, goal_node]) # Fallback path
-            dist = heuristic(start_node, goal_node)
-            total_a_star_distance += dist
-            total_a_star_time += dist / params['travel_speed']
-
-    a_star_metrics = {
-        "total_a_star_distance": total_a_star_distance,
-        "total_a_star_time_seconds": total_a_star_time
+    # Prepare data for pathfinding (in-memory)
+    layout_data = {
+        "factory_width": factory_w,
+        "factory_height": factory_h,
+        "process_sequence": process_sequence,
+        "machines_definitions": machines_definitions,
+        "machine_positions_map": {str(k): v for k, v in final_machine_positions_map.items()},
+        "final_metrics": best_overall_metrics,
+        "target_tph": target_tph # Pass this for the summary
     }
-    return all_paths_found, flow_density_grid, a_star_metrics
 
-# --- Streamlit UI ---
+    # --- Run Pathfinding Analysis ---
+    status_text.text("Running A* Pathfinding and Congestion Analysis...")
+    pathfinding_results = run_pathfinding_analysis(layout_data, material_travel_speed)
+    status_text.text("Analysis Complete!")
+    
+    return {
+        "ga_metrics": best_overall_metrics,
+        "a_star_metrics": pathfinding_results["a_star_metrics"],
+        "layout_log": layout_log,
+        "a_star_log": pathfinding_results["a_star_log"],
+        "summary_log": pathfinding_results["summary_log"],
+        "fig_ga_layout": fig_ga_layout,
+        "fig_ga_analysis": fig_ga_analysis,
+        "fig_path": pathfinding_results["fig_path"],
+        "fig_heat": pathfinding_results["fig_heat"]
+    }
 
-# Initialize session state
-if 'optimization_results' not in st.session_state:
-    st.session_state.optimization_results = None
-if 'run_clicked' not in st.session_state:
-    st.session_state.run_clicked = False
-
-# Default Machine Data
-default_machines_data = [
-    {"id": 0, "name": "Raw Material Input", "footprint_w": 2, "footprint_h": 2, "cycle_time": 20, "clearance": 1},
-    {"id": 1, "name": "1st Cutting", "footprint_w": 3, "footprint_h": 3, "cycle_time": 35, "clearance": 1},
-    {"id": 2, "name": "Milling Process", "footprint_w": 4, "footprint_h": 2, "cycle_time": 45, "clearance": 1},
-    {"id": 3, "name": "Drilling", "footprint_w": 2, "footprint_h": 2, "cycle_time": 25, "clearance": 1},
-    {"id": 4, "name": "Heat Treatment A", "footprint_w": 3, "footprint_h": 4, "cycle_time": 70, "clearance": 2},
-    {"id": 5, "name": "Precision Machining A", "footprint_w": 3, "footprint_h": 2, "cycle_time": 40, "clearance": 1},
-    {"id": 6, "name": "Assembly A", "footprint_w": 2, "footprint_h": 3, "cycle_time": 55, "clearance": 2},
-    {"id": 7, "name": "Final Inspection A", "footprint_w": 1, "footprint_h": 2, "cycle_time": 15, "clearance": 1},
-    {"id": 8, "name": "2nd Cutting", "footprint_w": 3, "footprint_h": 2, "cycle_time": 30, "clearance": 1},
-    {"id": 9, "name": "Surface Treatment", "footprint_w": 2, "footprint_h": 4, "cycle_time": 50, "clearance": 2},
-    {"id": 10, "name": "Washing Process 1", "footprint_w": 2, "footprint_h": 2, "cycle_time": 20, "clearance": 1},
-    {"id": 11, "name": "Heat Treatment B", "footprint_w": 4, "footprint_h": 4, "cycle_time": 75, "clearance": 2},
-    {"id": 12, "name": "Precision Machining B", "footprint_w": 2, "footprint_h": 3, "cycle_time": 42, "clearance": 1},
-    {"id": 13, "name": "Component Assembly", "footprint_w": 3, "footprint_h": 3, "cycle_time": 60, "clearance": 1},
-    {"id": 14, "name": "Quality Inspection B", "footprint_w": 2, "footprint_h": 1, "cycle_time": 18, "clearance": 1},
-    {"id": 15, "name": "Packaging Line A", "footprint_w": 4, "footprint_h": 3, "cycle_time": 30, "clearance": 2},
-]
+# ----------------------------------------------------------------------------------------------------
+# ------------------------------------ STREAMLIT UI DEFINITION ---------------------------------------
+# ----------------------------------------------------------------------------------------------------
 
 # --- Sidebar Inputs ---
-with st.sidebar:
-    st.image("https://i.imgur.com/v25JV2E.png", use_column_width=True) # A generic factory icon
-    st.title("⚙️ Configuration")
-    st.markdown("---")
+st.sidebar.title("Configuration")
 
-    with st.expander("🏭 **Factory & Production**", expanded=True):
-        factory_w = st.slider("Factory Width", 10, 100, 28)
-        factory_h = st.slider("Factory Height", 10, 100, 28)
-        target_tph = st.number_input("Target Production per Hour", 1, 200, 35)
-        travel_speed = st.number_input("Material Travel Speed (units/sec)", 0.1, 10.0, 0.5, 0.1)
-        
-    with st.expander("🧬 **Genetic Algorithm**", expanded=True):
-        pop_size = st.slider("Population Size", 50, 1000, 300, 50)
-        num_generations = st.slider("Number of Generations", 50, 1000, 300, 50)
-        mutation_rate = st.slider("Mutation Rate", 0.0, 1.0, 0.5, 0.05)
-        crossover_rate = st.slider("Crossover Rate", 0.0, 1.0, 0.8, 0.05)
-        elitism_count = st.slider("Elitism Count", 1, 20, 5)
-        tournament_size = st.slider("Tournament Size", 2, 20, 5)
+# Factory Settings
+st.sidebar.header("🏭 Factory Settings")
+factory_w = st.sidebar.number_input("Factory Width (units)", min_value=10, max_value=100, value=28)
+factory_h = st.sidebar.number_input("Factory Height (units)", min_value=10, max_value=100, value=28)
+target_tph = st.sidebar.number_input("Target Production (units/hr)", min_value=1, max_value=200, value=35)
+material_travel_speed = st.sidebar.slider("Material Travel Speed (units/sec)", 0.1, 5.0, 0.5, 0.1)
 
-    with st.expander("⚖️ **Fitness Weights**", expanded=False):
-        w_throughput = st.number_input("Throughput Weight", 0.0, 5.0, 1.0)
-        w_distance = st.number_input("Distance Weight", 0.0, 1.0, 0.005)
-        w_zone = st.number_input("Zone Penalty Weight", 0.0, 2.0, 0.5)
-        w_mhs = st.number_input("MHS Turn Penalty Weight", 0.0, 1.0, 0.001)
-        w_util = st.number_input("Area Utilization Bonus Weight", 0.0, 1.0, 0.1)
-        bonus_factor = st.number_input("Target Achievement Bonus Factor", 0.0, 1.0, 0.2)
+# GA Hyperparameters
+with st.sidebar.expander("🧬 GA Hyperparameters", expanded=False):
+    # *** THESE VALUES ARE REDUCED TO PREVENT CRASHING ON STREAMLIT CLOUD ***
+    population_size = st.sidebar.number_input("Population Size", min_value=10, max_value=1000, value=40)  # Reduced from 300
+    num_generations = st.sidebar.number_input("Number of Generations", min_value=10, max_value=2000, value=25)  # Reduced from 300
+    mutation_rate = st.sidebar.slider("Mutation Rate", 0.0, 1.0, 0.5, 0.01)
+    crossover_rate = st.sidebar.slider("Crossover Rate", 0.0, 1.0, 0.8, 0.01)
+    elitism_count = st.sidebar.number_input("Elitism Count", min_value=1, max_value=20, value=2) # Reduced from 5
+    tournament_size = st.sidebar.number_input("Tournament Size", min_value=2, max_value=20, value=3) # Reduced from 5
 
-    with st.expander("⛓️ **Constraints**", expanded=False):
-        area_util_min_thresh = st.slider("Min. Area Utilization Threshold", 0.0, 1.0, 0.40, 0.05)
-        zone_1_max_spread = st.slider("Zone 1 Max Spread Distance", 5.0, 50.0, 12.0, 0.5)
-        # We will get target machines from the multiselect in the main panel
+# Fitness Weights
+with st.sidebar.expander("⚖️ Fitness Weights", expanded=False):
+    throughput_weight = st.sidebar.number_input("Throughput Weight", value=1.0)
+    distance_weight = st.sidebar.number_input("Distance Weight", value=0.005, format="%.4f")
+    zone_penalty_weight = st.sidebar.number_input("Zone Penalty Weight", value=0.5)
+    mhs_turn_penalty_weight = st.sidebar.number_input("MHS Turn Penalty Weight", value=0.001, format="%.4f")
+    utilization_bonus_weight = st.sidebar.number_input("Area Utilization Bonus Weight", value=0.1)
+    bonus_for_target = st.sidebar.number_input("Bonus Factor (Target TPH)", value=0.2)
 
-# --- Main Panel ---
-st.title("🏭 GA-Powered Factory Layout Optimizer")
-st.markdown("""
-This application uses a **Genetic Algorithm (GA)** to optimize the placement of machines in a factory. 
-The goal is to find a layout that maximizes **throughput**, minimizes **material travel distance**, and adheres to specific **spatial constraints**. 
-After optimization, it uses the **A\* algorithm** to find and visualize the optimal material flow paths and identify potential congestion areas.
-""")
+# Constraint Parameters
+with st.sidebar.expander("⛓️ Constraint Parameters", expanded=False):
+    zone_1_targets_json = st.sidebar.text_input("Zone 1 Target Machine IDs (JSON)", value=DEFAULT_ZONE_1_TARGETS_JSON)
+    zone_1_max_spread = st.sidebar.number_input("Zone 1 Max Spread Distance", min_value=1.0, max_value=100.0, value=12.0)
+    area_util_min = st.sidebar.slider("Min Area Utilization Threshold", 0.0, 1.0, 0.40, 0.01)
 
-# --- Machine & Sequence Configuration ---
-st.header("1. Define Machines & Process Sequence")
+# Machine Data
+with st.sidebar.expander("🤖 Machine & Process Data (JSON)", expanded=True):
+    machines_json = st.sidebar.text_area("Machines Definitions", value=DEFAULT_MACHINES_JSON, height=300)
+    process_seq_json = st.sidebar.text_area("Process Sequence", value=DEFAULT_PROCESS_SEQUENCE_JSON, height=50)
 
-col1, col2 = st.columns([0.6, 0.4])
+# Run Button
+run_button = st.sidebar.button("🚀 Run Optimization", type="primary", use_container_width=True)
 
-with col1:
-    st.subheader("Machine Definitions")
-    uploaded_file = st.file_uploader("Or upload a machine configuration JSON", type="json")
-    if uploaded_file is not None:
-        try:
-            uploaded_data = json.load(uploaded_file)
-            # Adapt to the required DataFrame format
-            adapted_data = []
-            for item in uploaded_data:
-                w, h = item.get("footprint", (0,0))
-                adapted_data.append({
-                    "id": item.get("id"),
-                    "name": item.get("name"),
-                    "footprint_w": w,
-                    "footprint_h": h,
-                    "cycle_time": item.get("cycle_time"),
-                    "clearance": item.get("clearance")
-                })
-            edited_df = st.data_editor(
-                pd.DataFrame(adapted_data),
-                num_rows="dynamic",
-                key="machine_editor_uploaded"
-            )
-        except Exception as e:
-            st.error(f"Error parsing JSON file: {e}")
-            edited_df = st.data_editor(
-                pd.DataFrame(default_machines_data),
-                num_rows="dynamic",
-                key="machine_editor_default_error"
-            )
-    else:
-         edited_df = st.data_editor(
-            pd.DataFrame(default_machines_data),
-            num_rows="dynamic",
-            key="machine_editor_default"
-        )
+# --- Main Page Output Area ---
+st.header("📊 Optimization Results")
 
-# Convert dataframe back to the required list of dicts format for the algorithm
-machines_definitions = []
-for index, row in edited_df.iterrows():
-    if pd.notna(row['id']) and row['name']:
-        machines_definitions.append({
-            "id": int(row['id']),
-            "name": row['name'],
-            "footprint": (int(row['footprint_w']), int(row['footprint_h'])),
-            "cycle_time": int(row['cycle_time']),
-            "clearance": int(row['clearance'])
-        })
+# Setup tabs
+tab_summary, tab_ga_layout, tab_astar_path, tab_heatmap, tab_ga_graphs, tab_logs = st.tabs([
+    "📈 Summary", 
+    "🏭 GA Layout", 
+    "➡️ A* Paths", 
+    "🔥 Congestion Heatmap", 
+    "📉 GA Graphs",
+    "🖨️ Raw Logs"
+])
 
-with col2:
-    st.subheader("Process Sequence & Zone Constraints")
-    available_machines = {m['name']: m['id'] for m in machines_definitions}
-    
-    # Let user define the process sequence
-    selected_machine_names = st.multiselect(
-        "Define Process Sequence (Order matters)",
-        options=available_machines.keys(),
-        default=[m['name'] for m in machines_definitions]
-    )
-    process_sequence = [available_machines[name] for name in selected_machine_names]
-
-    # Let user define zone constraints
-    zone_1_target_names = st.multiselect(
-        "Select Machines for 'Zone 1' Proximity Constraint",
-        options=available_machines.keys(),
-        default=["1st Cutting", "Milling Process", "Drilling", "2nd Cutting"]
-    )
-    zone_1_target_machines = [available_machines[name] for name in zone_1_target_names]
+# Placeholders for live updates
+progress_placeholder = st.empty()
+status_text = st.empty()
 
 
-st.markdown("---")
-st.header("2. Run Optimization")
+if run_button:
+    # 1. Clear previous results
+    with tab_summary:
+        st.empty()
+    with tab_ga_layout:
+        st.empty()
+    with tab_astar_path:
+        st.empty()
+    with tab_heatmap:
+        st.empty()
+    with tab_ga_graphs:
+        st.empty()
+    with tab_logs:
+        st.empty()
 
-if st.button("🚀 Start Optimization & Analysis", type="primary", use_container_width=True):
-    st.session_state.run_clicked = True
-    st.session_state.optimization_results = None
-
-    # Prepare parameters for the run
-    params = {
-        'factory_w': factory_w, 'factory_h': factory_h, 'target_tph': target_tph, 'travel_speed': travel_speed,
-        'seconds_per_hour': 3600, 'pop_size': pop_size, 'num_generations': num_generations,
-        'mutation_rate': mutation_rate, 'crossover_rate': crossover_rate, 'elitism_count': elitism_count,
-        'tournament_size': tournament_size, 'bonus_factor': bonus_factor, 'area_util_min_thresh': area_util_min_thresh,
-        'weights': {'throughput': w_throughput, 'distance': w_distance, 'zone_penalty': w_zone,
-                    'mhs_turn_penalty': w_mhs, 'utilization_bonus': w_util},
-        'zone_params': {'target_machines': zone_1_target_machines, 'max_spread_dist': zone_1_max_spread}
-    }
-    
-    # Ensure machine definitions are ordered by the selected process sequence
+    # 2. Parse inputs
     try:
-        machines_defs_ordered_by_proc_seq = [next(m for m in machines_definitions if m["id"] == pid) for pid in process_sequence]
-    except StopIteration:
-        st.error("Error: One or more machines in the process sequence are not defined in the machine definitions table. Please check your inputs.")
+        machines_definitions = json.loads(machines_json)
+        process_sequence = json.loads(process_seq_json)
+        zone_1_target_machines = json.loads(zone_1_targets_json)
+    except json.JSONDecodeError as e:
+        st.error(f"Error parsing JSON input: {e}")
         st.stop()
-
-    with st.status("Running Optimization...", expanded=True) as status:
-        # --- Run GA ---
-        st.write("### Phase 1: Running Genetic Algorithm...")
-        ga_status_placeholder = st.empty()
-        best_chromosome, best_metrics, logs = run_genetic_algorithm(params, machines_defs_ordered_by_proc_seq, process_sequence, ga_status_placeholder)
-        
-        if not best_chromosome or not best_metrics.get("is_valid"):
-            status.update(label="GA failed to find a valid solution.", state="error", expanded=False)
-            st.error("The Genetic Algorithm could not find a valid layout. Try adjusting parameters (e.g., increase factory size, reduce machine footprints, or run for more generations).")
-        else:
-            final_machine_positions_map = {}
-            for i, machine_def in enumerate(machines_defs_ordered_by_proc_seq):
-                pos_x, pos_y = best_chromosome[i]
-                final_machine_positions_map[machine_def["id"]] = {
-                    "x": pos_x, "y": pos_y,
-                    "center_x": pos_x + machine_def["footprint"][0] / 2.0,
-                    "center_y": pos_y + machine_def["footprint"][1] / 2.0,
-                }
-            
-            ga_results_for_pathfinding = {
-                "factory_width": factory_w, "factory_height": factory_h,
-                "process_sequence": process_sequence, "machines_definitions": machines_definitions,
-                "machine_positions_map": {str(k): v for k, v in final_machine_positions_map.items()},
-                "final_metrics": best_metrics
-            }
-
-            # --- Run Pathfinding ---
-            st.write("### Phase 2: Running A* Pathfinding Analysis...")
-            time.sleep(1) # For better UX
-            all_paths, flow_grid, a_star_metrics = run_pathfinding_analysis(ga_results_for_pathfinding, params)
-            best_metrics.update(a_star_metrics)
-            
-            # --- Generate Visuals ---
-            st.write("### Phase 3: Generating Visualizations...")
-            time.sleep(1)
-            fig_layout = visualize_layout_plt(final_machine_positions_map, factory_w, factory_h, process_sequence, machines_definitions, params['zone_params'])
-            fig_path, fig_heat = visualize_layout_with_paths(ga_results_for_pathfinding, all_paths, flow_grid)
-            fig_performance = generate_performance_plots(logs, target_tph, area_util_min_thresh)
-
-            st.session_state.optimization_results = {
-                "params": params,
-                "metrics": best_metrics,
-                "machine_definitions": machines_definitions,
-                "final_layout_data": ga_results_for_pathfinding,
-                "figures": {
-                    "layout": fig_layout,
-                    "path": fig_path,
-                    "heatmap": fig_heat,
-                    "performance": fig_performance
-                }
-            }
-            status.update(label="Optimization Complete!", state="complete", expanded=False)
-
-if st.session_state.run_clicked and st.session_state.optimization_results:
-    results = st.session_state.optimization_results
-    metrics = results['metrics']
-    params = results['params']
     
-    st.markdown("---")
-    st.header("📈 Results & Analysis")
-    st.balloons()
-    
-    # Create tabs for different output sections
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Summary & Metrics", "🖼️ Layout & Flow Visuals", "📉 Performance Graphs", "💾 Raw Data"])
+    # 3. Bundle parameters
+    ga_params = {
+        "population_size": population_size,
+        "num_generations": num_generations,
+        "mutation_rate": mutation_rate,
+        "crossover_rate": crossover_rate,
+        "elitism_count": elitism_count,
+        "tournament_size": tournament_size
+    }
+    fitness_weights = {
+        "throughput": throughput_weight,
+        "distance": distance_weight,
+        "zone_penalty": zone_penalty_weight,
+        "mhs_turn_penalty": mhs_turn_penalty_weight,
+        "utilization_bonus": utilization_bonus_weight,
+        "bonus_for_target_achievement": bonus_for_target
+    }
+    constraint_params = {
+        "zone_1_target_machines": zone_1_target_machines,
+        "zone_1_max_spread_distance": zone_1_max_spread,
+        "area_util_min_threshold": area_util_min
+    }
 
-    with tab1:
-        st.subheader("Key Performance Indicators")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("GA Fitness Score", f"{metrics.get('fitness', 0.0):.2f}")
-        col2.metric("Hourly Throughput (TPH)", f"{metrics.get('throughput', 0.0):.2f}", f"Target: {params['target_tph']}")
-        col3.metric("Area Utilization", f"{metrics.get('utilization_ratio', 0.0)*100:.2f}%", f"Min Target: {params['area_util_min_thresh']*100:.0f}%")
-        
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Distance & Flow Metrics")
-            st.markdown(f"""
-            - **Euclidean Distance (GA):** `{metrics.get('distance', 0.0):.2f}` units
-            - **A* Path Distance (Flow):** `{metrics.get('total_a_star_distance', 0.0):.2f}` units
-            - **Total A* Travel Time:** `{metrics.get('total_a_star_time_seconds', 0.0):.2f}` seconds
-            """)
-
-            st.subheader("Constraint Penalties")
-            st.markdown(f"""
-            - **Zone 1 Proximity Penalty:** `{metrics.get('zone_penalty', 0.0):.2f}`
-            - **MHS Turn Penalty Component:** `{metrics.get('mhs_turn_penalty', 0.0):.3f}`
-            """)
-        
-        with col2:
-            st.subheader("Machine Utilization & Bottleneck Analysis")
-            machine_util_data = {int(k): v for k, v in metrics.get("machine_utilization", {}).items()}
-            machines_dict = {m['id']: m for m in results['machine_definitions']}
-            
-            util_rows = []
-            bottleneck_mid = max(machine_util_data, key=machine_util_data.get) if machine_util_data else None
-
-            for mid in process_sequence:
-                name = machines_dict.get(mid, {}).get("name", "N/A")
-                util = machine_util_data.get(mid, 0.0) * 100
-                is_bottleneck = "  bottleneck" if mid == bottleneck_mid else ""
-                util_rows.append({"Machine ID": f"M{mid}", "Name": name, "Utilization": util, "Note": is_bottleneck})
-            
-            util_df = pd.DataFrame(util_rows)
-            st.dataframe(util_df.style.format({"Utilization": "{:.2f}%"})
-                                      .highlight_max(subset="Utilization", color='lightcoral'),
-                                      use_container_width=True)
-
-    with tab2:
-        st.subheader("Optimized Layout Visualization")
-        st.pyplot(results['figures']['layout'])
-        st.markdown("---")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Material Flow Paths (A*)")
-            st.pyplot(results['figures']['path'])
-        with col2:
-            st.subheader("Congestion Heatmap")
-            st.pyplot(results['figures']['heatmap'])
-
-    with tab3:
-        st.subheader("Genetic Algorithm Performance Over Generations")
-        st.pyplot(results['figures']['performance'])
-
-    with tab4:
-        st.subheader("Download Full Results")
-        st.markdown("Click the button below to download a JSON file containing all the final layout data, machine positions, and performance metrics for external use.")
-        
-        # Prepare data for download
-        json_string = json.dumps(results['final_layout_data'], indent=4)
-        
-        st.download_button(
-            label="📥 Download Results as JSON",
-            data=json_string,
-            file_name="optimized_factory_layout.json",
-            mime="application/json",
-            use_container_width=True
+    # 4. Run the main process
+    with st.spinner("🚀 Running Optimization... This may take several minutes..."):
+        results = run_optimization_process(
+            factory_w, factory_h, target_tph, material_travel_speed,
+            ga_params, fitness_weights, constraint_params,
+            machines_definitions, process_sequence,
+            progress_placeholder, status_text
         )
+    
+    progress_placeholder.empty()
+    status_text.empty()
+
+    # 5. Display results
+    if results:
+        st.success("🎉 Optimization Complete!")
+        st.balloons()
         
-        with st.expander("Show JSON Data"):
-            st.json(results['final_layout_data'])
+        ga_metrics = results["ga_metrics"]
+        a_star_metrics = results["a_star_metrics"]
+
+        with tab_summary:
+            st.header("Key Performance Indicators")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Best Fitness Score", f"{ga_metrics.get('fitness', 0.0):.2f}")
+            col2.metric("Hourly Throughput (TPH)", f"{ga_metrics.get('throughput', 0.0):.2f}", f"{ga_metrics.get('throughput', 0.0) - target_tph:.2f} vs. Target")
+            col3.metric("A* Flow Distance", f"{a_star_metrics.get('total_a_star_distance', 0.0):.1f} units")
+            
+            col4, col5, col6 = st.columns(3)
+            col4.metric("Euclidean Distance", f"{ga_metrics.get('distance', 0.0):.2f} units")
+            col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
+            col6.metric("Zone 1 Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
+
+            st.header("Performance Summary")
+            st.code(results["summary_log"])
+        
+        with tab_ga_layout:
+            st.header("Best Layout (from Genetic Algorithm)")
+            st.pyplot(results["fig_ga_layout"])
+        
+        with tab_astar_path:
+            st.header("A* Material Flow Paths")
+            st.pyplot(results["fig_path"])
+        
+        with tab_heatmap:
+            st.header("Congestion Heatmap (from A* Flow)")
+            st.pyplot(results["fig_heat"])
+        
+        with tab_ga_graphs:
+            st.header("Genetic Algorithm Performance Graphs")
+            st.pyplot(results["fig_ga_analysis"])
+
+        with tab_logs:
+            st.header("Raw Layout Log")
+            st.code(results["layout_log"])
+            st.header("A* Pathfinding Log")
+            st.code(results["a_star_log"])
+    else:
+        st.error("Optimization failed to produce a valid result.")
