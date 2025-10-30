@@ -1280,7 +1280,10 @@ if run_button:
             
             col4, col5, col6 = st.columns(3)
             col4.metric("Euclidean Distance", f"{ga_metrics.get('distance', 0.0):.2f} units")
-            col5.metric("Area Utilization", f"{ga_modules.get('utilization_ratio', 0.0):.2%}")
+            
+            # *** THIS IS THE CORRECTED LINE ***
+            col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
+            
             col6.metric("Zone 1 Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
 
             st.header("Performance Summary")
