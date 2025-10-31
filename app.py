@@ -15,6 +15,93 @@ from matplotlib.colors import LinearSegmentedColormap
 
 # --- App Configuration ---
 st.set_page_config(layout="wide", page_title="Factory Layout Optimizer")
+
+# --- CUSTOM CSS ("Purple Haze" Theme) ---
+CSS_STYLE = """
+<style>
+
+/* --- Main App Background --- */
+[data-testid="stAppViewContainer"] {
+    background: linear-gradient(180deg, #E6E0FF 0%, #FFFFFF 40%);
+    background-attachment: fixed;
+}
+
+/* --- Sidebar Styling --- */
+[data-testid="stSidebar"] {
+    background-color: #F0EFFF; /* A very light purple for the sidebar */
+    border-right: 2px solid #D8CCFF;
+}
+
+/* --- Main "Run" Button --- */
+[data-testid="stButton"] button {
+    background: linear-gradient(90deg, #7F00FF, #4F359B); /* Vibrant purple gradient */
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 24px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(79, 53, 155, 0.3);
+}
+[data-testid="stButton"] button:hover {
+    transform: scale(1.05); /* "Pop" effect */
+    box-shadow: 0 6px 20px rgba(79, 53, 155, 0.5);
+}
+[data-testid="stButton"] button:active {
+    transform: scale(0.98);
+}
+
+/* --- Headings --- */
+h1, h2, h3 {
+    color: #4F359B; /* Dark purple for headings */
+}
+
+/* --- Sidebar Expander Headers --- */
+[data-testid="stExpander"] summary {
+    background-color: #E6E0FF;
+    color: #4F359B;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+[data-testid="stExpander"] summary:hover {
+    background-color: #D8CCFF;
+}
+
+/* --- Metric Cards (Interactive) --- */
+[data-testid="stMetric"] {
+    background-color: #FFFFFF;
+    border: 1px solid #D8CCFF;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    transition: all 0.3s ease;
+}
+[data-testid="stMetric"]:hover {
+    transform: scale(1.02); /* Subtle hover growth */
+    box-shadow: 0 6px 16px rgba(79, 53, 155, 0.1);
+}
+
+/* --- Tab Styling --- */
+[data-testid="stTabs"] [data-baseweb="tab-list"] button[aria-selected="true"] {
+    background-color: #E6E0FF;
+    color: #4F359B;
+    border-radius: 8px 8px 0 0;
+    border-bottom: 3px solid #7F00FF; /* Active tab underline */
+}
+
+/* --- Code Block Styling --- */
+[data-testid="stCodeBlock"] {
+    border: 1px solid #D8CCFF;
+    border-radius: 8px;
+}
+
+</style>
+"""
+st.markdown(CSS_STYLE, unsafe_allow_html=True)
+
+# --- End of CSS ---
+
+
 st.title("🏭 GA Factory Layout & A* Flow Optimizer")
 st.info(
     "Configure your factory, machines, and optimization parameters in the sidebar. "
@@ -855,7 +942,7 @@ def run_pathfinding_analysis(layout_data, material_travel_speed):
                     goal_node = get_best_access_point(next_pos_info, next_machine_def, obstacle_grid, factory_w, factory_h)
                     access_points_cache[next_machine_id] = goal_node
                 
-                path = a_star_search(obstacle_grid, start_node, goal_node, factory_w, factory_h)
+                path = a_star_search(obstacle_grid, start_node, goal_coords, factory_w, factory_h)
                 a_star_dist = 0
                 travel_time = 0
                 
@@ -1179,7 +1266,7 @@ with st.sidebar.expander("⛓️ Constraint Parameters", expanded=False):
     area_util_min = st.sidebar.slider("Min Area Utilization Threshold", 0.0, 1.0, 0.40, 0.01)
 
 # Machine Data
-with st.sidebar.expander("🤖 Machine & Process Data (JSON)", expanded=True):
+with st.sidebar.expander("🤖 Machine & Process Data", expanded=True):
     machines_json = st.sidebar.text_area("Machines Definitions", value=DEFAULT_MACHINES_JSON, height=300)
     process_seq_json = st.sidebar.text_area("Process Sequence", value=DEFAULT_PROCESS_SEQUENCE_JSON, height=50)
 
@@ -1252,7 +1339,7 @@ if run_button:
     }
 
     # 4. Run the main process
-    with st.spinner("🚀 Running Optimization... This may take several minutes..."):
+    with st.spinner("🚀 Running Optimization... This may take a moment..."):
         results = run_optimization_process(
             factory_w, factory_h, target_tph, material_travel_speed,
             ga_params, fitness_weights, constraint_params,
