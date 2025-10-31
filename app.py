@@ -16,40 +16,44 @@ from matplotlib.colors import LinearSegmentedColormap
 # --- App Configuration ---
 st.set_page_config(layout="wide", page_title="Factory Layout Optimizer")
 
-# --- CUSTOM CSS ("Dark Purple" Theme) ---
+# --- CUSTOM CSS ("Dark Purple / Orange" Theme) ---
 CSS_STYLE = """
 <style>
 
-/* --- Main App Background --- */
+/* --- Main App Background (Dark Purple) --- */
 [data-testid="stAppViewContainer"] {
-    background: linear-gradient(180deg, #2E1A47 0%, #1F1030 100%);
+    background: linear-gradient(180deg, #4F359B 0%, #2E1A47 100%);
     background-attachment: fixed;
     color: #E6E0FF; /* Light purple text for main body */
 }
 
-/* --- Sidebar Styling --- */
+/* --- Sidebar Styling (Light Purple) --- */
 [data-testid="stSidebar"] {
-    background-color: #1F1030; /* Darkest purple */
+    background-color: #E6E0FF; /* Light Purple */
     border-right: 2px solid #4F359B;
 }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
-    color: #E6E0FF; /* Light text in sidebar */
+    color: #2E1A47; /* Dark text in sidebar for contrast */
+}
+[data-testid="stSidebar"] .st-emotion-cache-16txtl3 {
+    color: #2E1A47; /* Sidebar input labels */
 }
 
-/* --- Main "Run" Button --- */
+
+/* --- Main "Run" Button (Orange) --- */
 [data-testid="stButton"] button {
-    background: linear-gradient(90deg, #9F60FF, #7F00FF); /* Vibrant purple gradient */
+    background: linear-gradient(90deg, #FF8C00, #FFA500); /* Orange gradient */
     color: white;
     border: none;
     border-radius: 12px;
     padding: 12px 24px;
     font-weight: bold;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(159, 96, 255, 0.3);
+    box-shadow: 0 4px 15px rgba(255, 140, 0, 0.3);
 }
 [data-testid="stButton"] button:hover {
     transform: scale(1.05); /* "Pop" effect */
-    box-shadow: 0 6px 20px rgba(159, 96, 255, 0.5);
+    box-shadow: 0 6px 20px rgba(255, 140, 0, 0.5);
 }
 [data-testid="stButton"] button:active {
     transform: scale(0.98);
@@ -63,21 +67,21 @@ h1 {
     color: #FFFFFF; /* White for main title */
 }
 
-/* --- Sidebar Expander Headers --- */
+/* --- Sidebar Expander Headers (Darker text on light bg) --- */
 [data-testid="stExpander"] summary {
-    background-color: #3E2C5E; /* Medium-dark purple */
-    color: #D8CCFF;
+    background-color: #D8CCFF; /* Slightly darker light purple */
+    color: #2E1A47; /* Dark purple text */
     border-radius: 8px;
     transition: all 0.2s ease;
 }
 [data-testid="stExpander"] summary:hover {
-    background-color: #4F359B; /* Brighter purple on hover */
+    background-color: #C8B8FF;
 }
 
 /* --- Metric Cards (Interactive) --- */
 [data-testid="stMetric"] {
     background-color: #3E2C5E; /* Medium-dark purple */
-    border: 1px solid #7F00FF; /* Vibrant border */
+    border: 1px solid #FF8C00; /* Orange border */
     border-radius: 12px;
     padding: 16px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
@@ -85,7 +89,7 @@ h1 {
 }
 [data-testid="stMetric"]:hover {
     transform: scale(1.02);
-    box-shadow: 0 6px 16px rgba(159, 96, 255, 0.15);
+    box-shadow: 0 6px 16px rgba(255, 140, 0, 0.15);
 }
 /* Metric label and value colors */
 [data-testid="stMetric"] label {
@@ -101,7 +105,7 @@ h1 {
     fill: #90EE90;
 }
 
-/* --- Tab Styling --- */
+/* --- Tab Styling (Orange accent) --- */
 [data-testid="stTabs"] [data-baseweb="tab-list"] button {
     color: #D8CCFF; /* Inactive tab text */
 }
@@ -109,7 +113,7 @@ h1 {
     background-color: #3E2C5E;
     color: #FFFFFF; /* Active tab text */
     border-radius: 8px 8px 0 0;
-    border-bottom: 3px solid #9F60FF; /* Active tab underline */
+    border-bottom: 3px solid #FFA500; /* Active tab underline (Orange) */
 }
 
 /* --- Code Block Styling --- */
@@ -121,8 +125,8 @@ h1 {
 
 /* --- Info/Success Box --- */
 [data-testid="stInfo"] {
-    background-color: rgba(216, 204, 255, 0.1);
-    border: 1px solid #7F00FF;
+    background-color: rgba(230, 224, 255, 0.1);
+    border: 1px solid #D8CCFF;
     color: #E6E0FF;
 }
 [data-testid="stSuccess"] {
@@ -435,8 +439,8 @@ def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, 
     fig, ax = plt.subplots(1, figsize=(max(10, factory_w/2), max(10, factory_h/2 + 1))) 
     
     # Style for dark mode
-    fig.patch.set_facecolor('#2E1A47')
-    ax.set_facecolor('#3E2C5E')
+    fig.patch.set_facecolor('#4F359B') # Main BG
+    ax.set_facecolor('#3E2C5E') # Plot BG
     ax.tick_params(colors='#D8CCFF')
     ax.xaxis.label.set_color('#D8CCFF')
     ax.yaxis.label.set_color('#D8CCFF')
@@ -452,7 +456,7 @@ def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, 
     ax.set_yticks(range(factory_h))
     ax.set_xticklabels(range(factory_w))
     ax.set_yticklabels(range(factory_h))
-    ax.grid(True, linestyle='--', alpha=0.3, color='#7F00FF')
+    ax.grid(True, linestyle='--', alpha=0.3, color='#FFA500') # Orange grid
     ax.set_aspect('equal', adjustable='box')
     ax.invert_yaxis() 
 
@@ -758,8 +762,8 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
     fig_path, ax_path = plt.subplots(1, figsize=(max(10, factory_w/2.5), max(10, factory_h/2.8))) 
     
     # Style for dark mode
-    fig_path.patch.set_facecolor('#2E1A47')
-    ax_path.set_facecolor('#3E2C5E')
+    fig_path.patch.set_facecolor('#4F359B') # Main BG
+    ax_path.set_facecolor('#3E2C5E') # Plot BG
     ax_path.tick_params(colors='#D8CCFF')
     ax_path.xaxis.label.set_color('#D8CCFF')
     ax_path.yaxis.label.set_color('#D8CCFF')
@@ -773,7 +777,7 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
     ax_path.set_ylim(-0.5, factory_h - 0.5)
     ax_path.set_xticks(range(factory_w))
     ax_path.set_yticks(range(factory_h))
-    ax_path.grid(True, linestyle='--', alpha=0.3, color='#7F00FF')
+    ax_path.grid(True, linestyle='--', alpha=0.3, color='#FFA500') # Orange grid
     ax_path.set_aspect('equal', adjustable='box')
 
     # Draw Machines for Path Plot
@@ -831,8 +835,8 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
     fig_heat, ax_heat = plt.subplots(1, figsize=(max(10, factory_w/2.5), max(10, factory_h/2.8))) 
     
     # Style for dark mode
-    fig_heat.patch.set_facecolor('#2E1A47')
-    ax_heat.set_facecolor('#3E2C5E')
+    fig_heat.patch.set_facecolor('#4F359B') # Main BG
+    ax_heat.set_facecolor('#3E2C5E') # Plot BG
     ax_heat.tick_params(colors='#D8CCFF')
     ax_heat.xaxis.label.set_color('#D8CCFF')
     ax_heat.yaxis.label.set_color('#D8CCFF')
@@ -846,7 +850,7 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
     ax_heat.set_ylim(-0.5, factory_h - 0.5)
     ax_heat.set_xticks(range(factory_w))
     ax_heat.set_yticks(range(factory_h))
-    ax_heat.grid(True, linestyle='--', alpha=0.3, color='#7F00FF')
+    ax_heat.grid(True, linestyle='--', alpha=0.3, color='#FFA500') # Orange grid
     ax_heat.set_aspect('equal', adjustable='box')
     ax_heat.invert_yaxis() 
 
@@ -1074,8 +1078,12 @@ def run_pathfinding_analysis(layout_data, material_travel_speed):
             }
 
         except Exception as e:
+            # Print the full traceback to the Streamlit log
+            import traceback
+            print("--- A* PATHFINDING ERROR TRACEBACK ---")
+            traceback.print_exc()
+            print("-----------------------------------------")
             st.error(f"Error during A* Pathfinding: {e}")
-            print(f"Error during A* Pathfinding: {e}")
             return {
                 "a_star_metrics": {}, "fig_path": None, "fig_heat": None, 
                 "a_star_log": f.getvalue(), "summary_log": ""
@@ -1084,14 +1092,14 @@ def run_pathfinding_analysis(layout_data, material_travel_speed):
 def generate_analysis_plots(logs, target_tph, target_util_thresh):
     """Generates the 6-panel GA performance plot. Returns a fig object."""
     fig, axs = plt.subplots(2, 3, figsize=(18, 10))
-    fig.patch.set_facecolor('#2E1A47') # Dark background for the figure
+    fig.patch.set_facecolor('#4F359B') # Dark background for the figure
     
     # Plot 1: Fitness Progress
     axs[0, 0].set_facecolor('#3E2C5E')
     axs[0, 0].plot(logs['best_fitness'], label='Best Fitness', color='#9F60FF')
     axs[0, 0].plot(logs['avg_fitness'], label='Average Fitness (Valid)', color='#00C49A', linestyle='--')
     axs[0, 0].set_xlabel('Generation'); axs[0, 0].set_ylabel('Fitness')
-    axs[0, 0].set_title('GA Fitness Progress'); axs[0, 0].legend(fontsize=8); axs[0, 0].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    axs[0, 0].set_title('GA Fitness Progress'); axs[0, 0].legend(fontsize=8); axs[0, 0].grid(True, linestyle=':', alpha=0.3, color='#FFA500')
     
     # Plot 2: Total Distance
     axs[0, 1].set_facecolor('#3E2C5E')
@@ -1099,7 +1107,7 @@ def generate_analysis_plots(logs, target_tph, target_util_thresh):
     if not any(d != float('inf') for d in logs['best_distance']) and logs['best_distance']: plot_distances = [0] * len(logs['best_distance']) 
     axs[0, 1].plot(plot_distances, label='Best Individual Euclidean Distance', color='#38A1FF')
     axs[0, 1].set_xlabel('Generation'); axs[0, 1].set_ylabel('Total Distance')
-    axs[0, 1].set_title('Best Individual Distance'); axs[0, 1].legend(fontsize=8); axs[0, 1].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    axs[0, 1].set_title('Best Individual Distance'); axs[0, 1].legend(fontsize=8); axs[0, 1].grid(True, linestyle=':', alpha=0.3, color='#FFA500')
     if any(d == float('inf') for d in logs['best_distance']): axs[0, 1].text(0.05, 0.95, "Note: 'inf' distances capped", transform=axs[0, 1].transAxes, fontsize=8, verticalalignment='top', color='#D8CCFF')
 
     # Plot 3: Throughput vs. Target
@@ -1107,26 +1115,26 @@ def generate_analysis_plots(logs, target_tph, target_util_thresh):
     axs[0, 2].plot(logs['best_throughput'], label='Best Individual Throughput', color='#FF6347')
     axs[0, 2].axhline(y=target_tph, color='gray', linestyle=':', label=f'Target TPH ({target_tph})')
     axs[0, 2].set_xlabel('Generation'); axs[0, 2].set_ylabel('Throughput')
-    axs[0, 2].set_title('Best Individual Throughput'); axs[0, 2].legend(fontsize=8); axs[0, 2].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    axs[0, 2].set_title('Best Individual Throughput'); axs[0, 2].legend(fontsize=8); axs[0, 2].grid(True, linestyle=':', alpha=0.3, color='#FFA500')
 
     # Plot 4: Valid Individuals Ratio
     axs[1, 0].set_facecolor('#3E2C5E')
     axs[1, 0].plot(logs['valid_ratio'], label='Valid Individuals Ratio (%)', color='#DAA520')
     axs[1, 0].set_xlabel('Generation'); axs[1, 0].set_ylabel('Valid Ratio (%)'); axs[1, 0].set_ylim(0, 105)
-    axs[1, 0].set_title('Valid Individuals Ratio'); axs[1, 0].legend(fontsize=8); axs[1, 0].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    axs[1, 0].set_title('Valid Individuals Ratio'); axs[1, 0].legend(fontsize=8); axs[1, 0].grid(True, linestyle=':', alpha=0.3, color='#FFA500')
 
     # Plot 5: Zone Constraint Penalty
     axs[1, 1].set_facecolor('#3E2C5E')
     axs[1, 1].plot(logs['best_zone_penalty'], label='Zone Constraint Penalty (Best)', color='#FF8C00')
     axs[1, 1].set_xlabel('Generation'); axs[1, 1].set_ylabel('Penalty Value'); 
-    axs[1, 1].set_title('Zone Proximity Penalty'); axs[1, 1].legend(fontsize=8); axs[1, 1].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    axs[1, 1].set_title('Zone Proximity Penalty'); axs[1, 1].legend(fontsize=8); axs[1, 1].grid(True, linestyle=':', alpha=0.3, color='#FFA500')
 
     # Plot 6: Area Utilization Ratio
     axs[1, 2].set_facecolor('#3E2C5E')
     axs[1, 2].plot([r * 100 for r in logs['best_utilization']], label='Area Utilization (Best)', color='#ADFF2F')
     axs[1, 2].axhline(y=target_util_thresh * 100, color='gray', linestyle=':', label=f'Target Min ({target_util_thresh*100:.0f}%)')
     axs[1, 2].set_xlabel('Generation'); axs[1, 2].set_ylabel('Utilization (%)'); 
-    axs[1, 2].set_title('Area Utilization Ratio'); axs[1, 2].legend(fontsize=8); axs[1, 2].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    axs[1, 2].set_title('Area Utilization Ratio'); axs[1, 2].legend(fontsize=8); axs[1, 2].grid(True, linestyle=':', alpha=0.3, color='#FFA500')
     
     # Apply dark mode styling to all axes
     for ax_row in axs:
@@ -1472,10 +1480,7 @@ if run_button:
             
             col4, col5, col6 = st.columns(3)
             col4.metric("Euclidean Distance", f"{ga_metrics.get('distance', 0.0):.2f} units")
-            
-            # *** This was the corrected line from the previous error ***
             col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
-            
             col6.metric("Zone 1 Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
 
             st.header("Performance Summary")
