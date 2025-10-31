@@ -16,36 +16,40 @@ from matplotlib.colors import LinearSegmentedColormap
 # --- App Configuration ---
 st.set_page_config(layout="wide", page_title="Factory Layout Optimizer")
 
-# --- CUSTOM CSS ("Purple Haze" Theme) ---
+# --- CUSTOM CSS ("Dark Purple" Theme) ---
 CSS_STYLE = """
 <style>
 
 /* --- Main App Background --- */
 [data-testid="stAppViewContainer"] {
-    background: linear-gradient(180deg, #E6E0FF 0%, #FFFFFF 40%);
+    background: linear-gradient(180deg, #2E1A47 0%, #1F1030 100%);
     background-attachment: fixed;
+    color: #E6E0FF; /* Light purple text for main body */
 }
 
 /* --- Sidebar Styling --- */
 [data-testid="stSidebar"] {
-    background-color: #F0EFFF; /* A very light purple for the sidebar */
-    border-right: 2px solid #D8CCFF;
+    background-color: #1F1030; /* Darkest purple */
+    border-right: 2px solid #4F359B;
+}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+    color: #E6E0FF; /* Light text in sidebar */
 }
 
 /* --- Main "Run" Button --- */
 [data-testid="stButton"] button {
-    background: linear-gradient(90deg, #7F00FF, #4F359B); /* Vibrant purple gradient */
+    background: linear-gradient(90deg, #9F60FF, #7F00FF); /* Vibrant purple gradient */
     color: white;
     border: none;
     border-radius: 12px;
     padding: 12px 24px;
     font-weight: bold;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 15px rgba(79, 53, 155, 0.3);
+    box-shadow: 0 4px 15px rgba(159, 96, 255, 0.3);
 }
 [data-testid="stButton"] button:hover {
     transform: scale(1.05); /* "Pop" effect */
-    box-shadow: 0 6px 20px rgba(79, 53, 155, 0.5);
+    box-shadow: 0 6px 20px rgba(159, 96, 255, 0.5);
 }
 [data-testid="stButton"] button:active {
     transform: scale(0.98);
@@ -53,46 +57,78 @@ CSS_STYLE = """
 
 /* --- Headings --- */
 h1, h2, h3 {
-    color: #4F359B; /* Dark purple for headings */
+    color: #D8CCFF; /* Light purple for headings */
+}
+h1 {
+    color: #FFFFFF; /* White for main title */
 }
 
 /* --- Sidebar Expander Headers --- */
 [data-testid="stExpander"] summary {
-    background-color: #E6E0FF;
-    color: #4F359B;
+    background-color: #3E2C5E; /* Medium-dark purple */
+    color: #D8CCFF;
     border-radius: 8px;
     transition: all 0.2s ease;
 }
 [data-testid="stExpander"] summary:hover {
-    background-color: #D8CCFF;
+    background-color: #4F359B; /* Brighter purple on hover */
 }
 
 /* --- Metric Cards (Interactive) --- */
 [data-testid="stMetric"] {
-    background-color: #FFFFFF;
-    border: 1px solid #D8CCFF;
+    background-color: #3E2C5E; /* Medium-dark purple */
+    border: 1px solid #7F00FF; /* Vibrant border */
     border-radius: 12px;
     padding: 16px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     transition: all 0.3s ease;
 }
 [data-testid="stMetric"]:hover {
-    transform: scale(1.02); /* Subtle hover growth */
-    box-shadow: 0 6px 16px rgba(79, 53, 155, 0.1);
+    transform: scale(1.02);
+    box-shadow: 0 6px 16px rgba(159, 96, 255, 0.15);
+}
+/* Metric label and value colors */
+[data-testid="stMetric"] label {
+    color: #D8CCFF; /* Light purple for label */
+}
+[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+    color: #FFFFFF; /* White for value */
+}
+[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+    color: #90EE90; /* Light green for positive delta */
+}
+[data-testid="stMetric"] div[data-testid="stMetricDelta"] svg {
+    fill: #90EE90;
 }
 
 /* --- Tab Styling --- */
+[data-testid="stTabs"] [data-baseweb="tab-list"] button {
+    color: #D8CCFF; /* Inactive tab text */
+}
 [data-testid="stTabs"] [data-baseweb="tab-list"] button[aria-selected="true"] {
-    background-color: #E6E0FF;
-    color: #4F359B;
+    background-color: #3E2C5E;
+    color: #FFFFFF; /* Active tab text */
     border-radius: 8px 8px 0 0;
-    border-bottom: 3px solid #7F00FF; /* Active tab underline */
+    border-bottom: 3px solid #9F60FF; /* Active tab underline */
 }
 
 /* --- Code Block Styling --- */
 [data-testid="stCodeBlock"] {
-    border: 1px solid #D8CCFF;
+    background-color: #1F1030;
+    border: 1px solid #4F359B;
     border-radius: 8px;
+}
+
+/* --- Info/Success Box --- */
+[data-testid="stInfo"] {
+    background-color: rgba(216, 204, 255, 0.1);
+    border: 1px solid #7F00FF;
+    color: #E6E0FF;
+}
+[data-testid="stSuccess"] {
+    background-color: rgba(144, 238, 144, 0.1);
+    border: 1px solid #90EE90;
+    color: #E6E0FF;
 }
 
 </style>
@@ -397,13 +433,26 @@ def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, 
     """Visualizes the final layout using matplotlib. Returns a fig object."""
     
     fig, ax = plt.subplots(1, figsize=(max(10, factory_w/2), max(10, factory_h/2 + 1))) 
+    
+    # Style for dark mode
+    fig.patch.set_facecolor('#2E1A47')
+    ax.set_facecolor('#3E2C5E')
+    ax.tick_params(colors='#D8CCFF')
+    ax.xaxis.label.set_color('#D8CCFF')
+    ax.yaxis.label.set_color('#D8CCFF')
+    ax.title.set_color('#FFFFFF')
+    ax.spines['bottom'].set_color('#4F359B')
+    ax.spines['top'].set_color('#4F359B')
+    ax.spines['left'].set_color('#4F359B')
+    ax.spines['right'].set_color('#4F359B')
+
     ax.set_xlim(-0.5, factory_w - 0.5)
     ax.set_ylim(-0.5, factory_h - 0.5)
     ax.set_xticks(range(factory_w))
     ax.set_yticks(range(factory_h))
     ax.set_xticklabels(range(factory_w))
     ax.set_yticklabels(range(factory_h))
-    ax.grid(True, linestyle='--', alpha=0.7)
+    ax.grid(True, linestyle='--', alpha=0.3, color='#7F00FF')
     ax.set_aspect('equal', adjustable='box')
     ax.invert_yaxis() 
 
@@ -439,7 +488,7 @@ def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, 
                                          edgecolor='red', 
                                          facecolor='none', 
                                          linestyle='--', 
-                                         alpha=0.4,
+                                         alpha=0.6,
                                          label=f"Zone 1 Max Spread ({zone_1_max_spread_distance})")
         ax.add_patch(circle_required)
 
@@ -458,7 +507,7 @@ def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, 
                 color_value = machine_id_in_seq / max(num_machines - 1, 1) 
                 rect_body = patches.Rectangle((x - 0.5, y - 0.5), width, height,
                                               linewidth=1.5, edgecolor='black',
-                                              facecolor=cmap(color_value), alpha=0.7)
+                                              facecolor=cmap(color_value), alpha=0.8)
                 ax.add_patch(rect_body)
 
                 text_x = x + width / 2 - 0.5
@@ -479,7 +528,8 @@ def visualize_layout_plt(grid_layout_to_show, machine_positions_map, factory_w, 
     plt.xlabel("Factory Width (X)")
     plt.ylabel("Factory Height (Y)")
     plt.gca().invert_yaxis() 
-    plt.legend()
+    legend = plt.legend()
+    plt.setp(legend.get_texts(), color='#D8CCFF')
     
     return fig
 
@@ -706,11 +756,24 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
 
     # --- Visualization 1: Path Overlay ---
     fig_path, ax_path = plt.subplots(1, figsize=(max(10, factory_w/2.5), max(10, factory_h/2.8))) 
+    
+    # Style for dark mode
+    fig_path.patch.set_facecolor('#2E1A47')
+    ax_path.set_facecolor('#3E2C5E')
+    ax_path.tick_params(colors='#D8CCFF')
+    ax_path.xaxis.label.set_color('#D8CCFF')
+    ax_path.yaxis.label.set_color('#D8CCFF')
+    ax_path.title.set_color('#FFFFFF')
+    ax_path.spines['bottom'].set_color('#4F359B')
+    ax_path.spines['top'].set_color('#4F359B')
+    ax_path.spines['left'].set_color('#4F359B')
+    ax_path.spines['right'].set_color('#4F359B')
+    
     ax_path.set_xlim(-0.5, factory_w - 0.5)
     ax_path.set_ylim(-0.5, factory_h - 0.5)
     ax_path.set_xticks(range(factory_w))
     ax_path.set_yticks(range(factory_h))
-    ax_path.grid(True, linestyle='--', alpha=0.7)
+    ax_path.grid(True, linestyle='--', alpha=0.3, color='#7F00FF')
     ax_path.set_aspect('equal', adjustable='box')
 
     # Draw Machines for Path Plot
@@ -726,7 +789,7 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
 
             rect_body = patches.Rectangle((x - 0.5, y - 0.5), width, height,
                                           linewidth=1.5, edgecolor='black',
-                                          facecolor=face_color, alpha=0.7)
+                                          facecolor=face_color, alpha=0.8)
             ax_path.add_patch(rect_body)
             ax_path.text(x + width/2 - 0.5, y + height/2 - 0.5, f"M{machine_id}",
                          ha='center', va='center', fontsize=7, color='white', weight='bold')
@@ -766,11 +829,24 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
 
     # --- Visualization 2: Congestion Heatmap ---
     fig_heat, ax_heat = plt.subplots(1, figsize=(max(10, factory_w/2.5), max(10, factory_h/2.8))) 
+    
+    # Style for dark mode
+    fig_heat.patch.set_facecolor('#2E1A47')
+    ax_heat.set_facecolor('#3E2C5E')
+    ax_heat.tick_params(colors='#D8CCFF')
+    ax_heat.xaxis.label.set_color('#D8CCFF')
+    ax_heat.yaxis.label.set_color('#D8CCFF')
+    ax_heat.title.set_color('#FFFFFF')
+    ax_heat.spines['bottom'].set_color('#4F359B')
+    ax_heat.spines['top'].set_color('#4F359B')
+    ax_heat.spines['left'].set_color('#4F359B')
+    ax_heat.spines['right'].set_color('#4F359B')
+
     ax_heat.set_xlim(-0.5, factory_w - 0.5)
     ax_heat.set_ylim(-0.5, factory_h - 0.5)
     ax_heat.set_xticks(range(factory_w))
     ax_heat.set_yticks(range(factory_h))
-    ax_heat.grid(True, linestyle='--', alpha=0.7)
+    ax_heat.grid(True, linestyle='--', alpha=0.3, color='#7F00FF')
     ax_heat.set_aspect('equal', adjustable='box')
     ax_heat.invert_yaxis() 
 
@@ -788,6 +864,9 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
         
         cbar = fig_heat.colorbar(im, ax=ax_heat, fraction=0.046, pad=0.04)
         cbar.set_label('Material Flow Density (Path Overlaps)')
+        plt.setp(plt.getp(cbar.ax.yaxis, 'ticklabels'), color='#D8CCFF')
+        cbar.ax.yaxis.label.set_color('#D8CCFF')
+
 
     # Draw Machines for Heatmap Plot
     for machine_id, pos_data in machine_positions_map.items(): 
@@ -800,7 +879,7 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
 
             rect_body = patches.Rectangle((x - 0.5, y - 0.5), width, height,
                                           linewidth=1.5, edgecolor='black',
-                                          facecolor=face_color, alpha=0.7)
+                                          facecolor=face_color, alpha=0.8)
             ax_heat.add_patch(rect_body)
             ax_heat.text(x + width/2 - 0.5, y + height/2 - 0.5, f"M{machine_id}",
                          ha='center', va='center', fontsize=7, color='white', weight='bold')
@@ -942,7 +1021,11 @@ def run_pathfinding_analysis(layout_data, material_travel_speed):
                     goal_node = get_best_access_point(next_pos_info, next_machine_def, obstacle_grid, factory_w, factory_h)
                     access_points_cache[next_machine_id] = goal_node
                 
-                path = a_star_search(obstacle_grid, start_node, goal_coords, factory_w, factory_h)
+                # *** THIS IS THE BUG FIX ***
+                # Was: a_star_search(..., goal_coords, ...)
+                # Now: a_star_search(..., goal_node, ...)
+                path = a_star_search(obstacle_grid, start_node, goal_node, factory_w, factory_h)
+                
                 a_star_dist = 0
                 travel_time = 0
                 
@@ -1001,43 +1084,65 @@ def run_pathfinding_analysis(layout_data, material_travel_speed):
 def generate_analysis_plots(logs, target_tph, target_util_thresh):
     """Generates the 6-panel GA performance plot. Returns a fig object."""
     fig, axs = plt.subplots(2, 3, figsize=(18, 10))
+    fig.patch.set_facecolor('#2E1A47') # Dark background for the figure
     
-    # 1. Fitness Progress
-    axs[0, 0].plot(logs['best_fitness'], label='Best Fitness', color='blue')
-    axs[0, 0].plot(logs['avg_fitness'], label='Average Fitness (Valid)', color='cyan', linestyle='--')
+    # Plot 1: Fitness Progress
+    axs[0, 0].set_facecolor('#3E2C5E')
+    axs[0, 0].plot(logs['best_fitness'], label='Best Fitness', color='#9F60FF')
+    axs[0, 0].plot(logs['avg_fitness'], label='Average Fitness (Valid)', color='#00C49A', linestyle='--')
     axs[0, 0].set_xlabel('Generation'); axs[0, 0].set_ylabel('Fitness')
-    axs[0, 0].set_title('GA Fitness Progress'); axs[0, 0].legend(fontsize=8); axs[0, 0].grid(True, linestyle=':', alpha=0.7)
-
-    # 2. Total Distance
+    axs[0, 0].set_title('GA Fitness Progress'); axs[0, 0].legend(fontsize=8); axs[0, 0].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    
+    # Plot 2: Total Distance
+    axs[0, 1].set_facecolor('#3E2C5E')
     plot_distances = [d if d != float('inf') else max(filter(lambda x: x!=float('inf'), logs['best_distance']), default=1000)*1.1 for d in logs['best_distance']]
     if not any(d != float('inf') for d in logs['best_distance']) and logs['best_distance']: plot_distances = [0] * len(logs['best_distance']) 
-    axs[0, 1].plot(plot_distances, label='Best Individual Euclidean Distance', color='green')
+    axs[0, 1].plot(plot_distances, label='Best Individual Euclidean Distance', color='#38A1FF')
     axs[0, 1].set_xlabel('Generation'); axs[0, 1].set_ylabel('Total Distance')
-    axs[0, 1].set_title('Best Individual Distance'); axs[0, 1].legend(fontsize=8); axs[0, 1].grid(True, linestyle=':', alpha=0.7)
-    if any(d == float('inf') for d in logs['best_distance']): axs[0, 1].text(0.05, 0.95, "Note: 'inf' distances capped", transform=axs[0, 1].transAxes, fontsize=8, verticalalignment='top')
+    axs[0, 1].set_title('Best Individual Distance'); axs[0, 1].legend(fontsize=8); axs[0, 1].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
+    if any(d == float('inf') for d in logs['best_distance']): axs[0, 1].text(0.05, 0.95, "Note: 'inf' distances capped", transform=axs[0, 1].transAxes, fontsize=8, verticalalignment='top', color='#D8CCFF')
 
-    # 3. Throughput vs. Target
-    axs[0, 2].plot(logs['best_throughput'], label='Best Individual Throughput', color='red')
+    # Plot 3: Throughput vs. Target
+    axs[0, 2].set_facecolor('#3E2C5E')
+    axs[0, 2].plot(logs['best_throughput'], label='Best Individual Throughput', color='#FF6347')
     axs[0, 2].axhline(y=target_tph, color='gray', linestyle=':', label=f'Target TPH ({target_tph})')
     axs[0, 2].set_xlabel('Generation'); axs[0, 2].set_ylabel('Throughput')
-    axs[0, 2].set_title('Best Individual Throughput'); axs[0, 2].legend(fontsize=8); axs[0, 2].grid(True, linestyle=':', alpha=0.7)
+    axs[0, 2].set_title('Best Individual Throughput'); axs[0, 2].legend(fontsize=8); axs[0, 2].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
 
-    # 4. Valid Individuals Ratio
-    axs[1, 0].plot(logs['valid_ratio'], label='Valid Individuals Ratio (%)', color='purple')
+    # Plot 4: Valid Individuals Ratio
+    axs[1, 0].set_facecolor('#3E2C5E')
+    axs[1, 0].plot(logs['valid_ratio'], label='Valid Individuals Ratio (%)', color='#DAA520')
     axs[1, 0].set_xlabel('Generation'); axs[1, 0].set_ylabel('Valid Ratio (%)'); axs[1, 0].set_ylim(0, 105)
-    axs[1, 0].set_title('Valid Individuals Ratio'); axs[1, 0].legend(fontsize=8); axs[1, 0].grid(True, linestyle=':', alpha=0.7)
+    axs[1, 0].set_title('Valid Individuals Ratio'); axs[1, 0].legend(fontsize=8); axs[1, 0].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
 
-    # 5. Zone Constraint Penalty
-    axs[1, 1].plot(logs['best_zone_penalty'], label='Zone Constraint Penalty (Best)', color='orange')
+    # Plot 5: Zone Constraint Penalty
+    axs[1, 1].set_facecolor('#3E2C5E')
+    axs[1, 1].plot(logs['best_zone_penalty'], label='Zone Constraint Penalty (Best)', color='#FF8C00')
     axs[1, 1].set_xlabel('Generation'); axs[1, 1].set_ylabel('Penalty Value'); 
-    axs[1, 1].set_title('Zone Proximity Penalty'); axs[1, 1].legend(fontsize=8); axs[1, 1].grid(True, linestyle=':', alpha=0.7)
+    axs[1, 1].set_title('Zone Proximity Penalty'); axs[1, 1].legend(fontsize=8); axs[1, 1].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
 
-    # 6. Area Utilization Ratio
-    axs[1, 2].plot([r * 100 for r in logs['best_utilization']], label='Area Utilization (Best)', color='brown')
+    # Plot 6: Area Utilization Ratio
+    axs[1, 2].set_facecolor('#3E2C5E')
+    axs[1, 2].plot([r * 100 for r in logs['best_utilization']], label='Area Utilization (Best)', color='#ADFF2F')
     axs[1, 2].axhline(y=target_util_thresh * 100, color='gray', linestyle=':', label=f'Target Min ({target_util_thresh*100:.0f}%)')
     axs[1, 2].set_xlabel('Generation'); axs[1, 2].set_ylabel('Utilization (%)'); 
-    axs[1, 2].set_title('Area Utilization Ratio'); axs[1, 2].legend(fontsize=8); axs[1, 2].grid(True, linestyle=':', alpha=0.7)
+    axs[1, 2].set_title('Area Utilization Ratio'); axs[1, 2].legend(fontsize=8); axs[1, 2].grid(True, linestyle=':', alpha=0.3, color='#7F00FF')
     
+    # Apply dark mode styling to all axes
+    for ax_row in axs:
+        for ax in ax_row:
+            ax.tick_params(colors='#D8CCFF')
+            ax.xaxis.label.set_color('#D8CCFF')
+            ax.yaxis.label.set_color('#D8CCFF')
+            ax.title.set_color('#FFFFFF')
+            ax.spines['bottom'].set_color('#4F359B')
+            ax.spines['top'].set_color('#4F359B')
+            ax.spines['left'].set_color('#4F359B')
+            ax.spines['right'].set_color('#4F359B')
+            legend = ax.get_legend()
+            if legend:
+                plt.setp(legend.get_texts(), color='#D8CCFF')
+
     plt.tight_layout()
     return fig
 
@@ -1368,7 +1473,7 @@ if run_button:
             col4, col5, col6 = st.columns(3)
             col4.metric("Euclidean Distance", f"{ga_metrics.get('distance', 0.0):.2f} units")
             
-            # *** THIS IS THE CORRECTED LINE ***
+            # *** This was the corrected line from the previous error ***
             col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
             
             col6.metric("Zone 1 Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
