@@ -891,7 +891,7 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
 def generate_performance_summary(ga_metrics, a_star_metrics, process_sequence, machines_defs, target_tph, cost_params, current_total_distance):
     """This function is designed to be captured by redirect_stdout."""
 
-    machine_util_data_str = ga_metrics.get("utilization", {})
+    machine_util_data_str = ga_metrics.get("machine_utilization", {})
     machine_util_data = {int(k): v for k, v in machine_util_data_str.items()}  
 
     util_rows = []
@@ -1376,7 +1376,7 @@ with st.sidebar.expander("💰 Cost & Revenue Factors", expanded=True):
     cost_per_sec_bottleneck = st.number_input("Cost per Second Bottleneck Time (WIP)", value=0.05, format="%.2f", help="e.g., Holding cost per second bottleneck time.")
     cost_per_unused_area = st.number_input("Cost per Unused Area Unit (Overhead)", value=1.00, format="%.2f", help="e.g., Annual overhead cost per sq. unit.")
     st.subheader("Revenue Multiplier")
-    revenue_per_tph_factor = st.number_input("Revenue Factor (per TPH)", value=1000.00, format="%.2f", help="Factor applied to throughput to estimate revenue.")
+    revenue_per_tph_factor = st.number_input("Revenue Factor (per TPH)", value=5000.00, format="%.2f", help="Factor applied to throughput to estimate revenue.")
     
 # Fitness Weights (only for penalties and non-cost benefits)
 with st.sidebar.expander("⚖️ Fitness Multipliers", expanded=False):
@@ -1479,8 +1479,6 @@ if run_button:
             # --- ROW 1: CORE METRICS ---
             col1, col2, col3 = st.columns(3)
             
-            # TOTAL ESTIMATED COST - with explanation tooltip
-            
             # Total Estimated Annual Cost metric
             annual_cost_help = (
                 f"Total Estimated Annual Cost is the sum of three main cost drivers:\n\n"
@@ -1493,11 +1491,11 @@ if run_button:
             # Best Fitness Score help (Non-Dollar)
             fitness_score_help = (
                 f"The ultimate optimization target. This numerical value is calculated as:\n\n"
-                f"Fitness = (Revenue Value) - (Cost) - (Constraint Penalty)"
+                f"Fitness = (Optimized Revenue Value) - (Total Estimated Annual Cost) - (Total Constraint Penalty)"
             )
 
             
-            col1.metric("Best Fitness Score", f"{14.25}", 
+            col1.metric("Best Fitness Score", f"{ga_metrics.get('fitness', 0.0):,.2f}", 
                         help=fitness_score_help)
             col2.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}",
                         help=annual_cost_help) 
