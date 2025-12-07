@@ -891,7 +891,7 @@ def visualize_layout_with_paths(layout_data, all_paths, flow_density_grid):
 def generate_performance_summary(ga_metrics, a_star_metrics, process_sequence, machines_defs, target_tph, cost_params, current_total_distance):
     """This function is designed to be captured by redirect_stdout."""
 
-    machine_util_data_str = ga_metrics.get("machine_utilization", {})
+    machine_util_data_str = ga_metrics.get("utilization", {})
     machine_util_data = {int(k): v for k, v in machine_util_data_str.items()}  
 
     util_rows = []
@@ -1480,12 +1480,6 @@ if run_button:
             col1, col2, col3 = st.columns(3)
             
             # TOTAL ESTIMATED COST - with explanation tooltip
-            cost_help_text = (
-                f"Total Estimated Annual Cost is the sum of:\n\n"
-                f"1. MHS Travel Cost (Optimized Distance * ${cost_params['cost_per_unit_distance']:.2f})\n"
-                f"2. WIP/Idle Time Cost (Based on Bottleneck Time * ${cost_params['cost_per_sec_bottleneck']:.2f})\n"
-                f"3. Unused Area Overhead Cost (Unused Area * ${cost_params['cost_per_unused_area']:.2f})"
-            )
             
             # Total Estimated Annual Cost metric
             annual_cost_help = (
@@ -1495,10 +1489,16 @@ if run_button:
                 f"3. Unused Area Cost: {ga_metrics.get('unused_area_cost', 0.0):,.2f}\n\n"
                 f"Calculation: MHS Cost + WIP Cost + Unused Area Cost"
             )
+            
+            # Best Fitness Score help (Non-Dollar)
+            fitness_score_help = (
+                f"The ultimate optimization target. This numerical value is calculated as:\n\n"
+                f"Fitness = (Optimized Revenue Value) - (Total Estimated Annual Cost) - (Total Constraint Penalty)"
+            )
 
             
-            col1.metric("Best Fitness Score", f"${ga_metrics.get('fitness', 0.0):,.2f}", 
-                        help="Fitness = Revenue - Total Cost - Penalty")
+            col1.metric("Best Fitness Score", f"{ga_metrics.get('fitness', 0.0):,.2f}", 
+                        help=fitness_score_help)
             col2.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}",
                         help=annual_cost_help) 
             col3.metric("Hourly Throughput (TPH)", f"{ga_metrics.get('throughput', 0.0):.2f}", f"{ga_metrics.get('throughput', 0.0) - target_tph:.2f} vs. Target")
