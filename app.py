@@ -33,10 +33,10 @@ CSS_STYLE = """
     border-right: 2px solid #4F359B;
 }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
-    color: #2E1A47; /* Dark text in sidebar for contrast */
+    color: #FFFFFF; /* Dark text in sidebar for contrast */
 }
 [data-testid="stSidebar"] .st-emotion-cache-16txtl3 {
-    color: #2E1A47; /* Sidebar input labels */
+    color: #FFFFFF; /* Sidebar input labels */
 }
 
 
