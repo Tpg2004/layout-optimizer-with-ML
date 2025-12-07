@@ -22,7 +22,7 @@ CSS_STYLE = """
 
 /* --- Main App Background (Dark Purple) --- */
 [data-testid="stAppViewContainer"] {
-    background: linear-gradient(180deg, #eda1d9 0%, #f024ce 100%);
+    background: linear-gradient(180deg, #eda1d9 0%, #FFFFFF 100%);
     background-attachment: fixed;
     color: #FFFFFF; /* Light purple text for main body */
 }
