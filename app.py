@@ -1483,7 +1483,7 @@ if run_button:
             
             # --- ROW 1: CORE METRICS ---
             col1, col2, col3 = st.columns(3)
-            col1.metric("Best Fitness Score", f"${42.59}", help="Fitness = (\text{Throughput/Revenue Benefit}) - (\text{MHS Cost}) - (\text{WIP/Bottleneck Cost}) - (\text{Unused Area Cost}) - (\text{Zone Penalty Cost})$$")
+            col1.metric("Best Fitness Score", f"{42.59}", help="Fitness = (\text{Throughput/Revenue Benefit}) - (\text{MHS Cost}) - (\text{WIP/Bottleneck Cost}) - (\text{Unused Area Cost}) - (\text{Zone Penalty Cost})$$")
             col2.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}")
             col3.metric("Hourly Throughput (TPH)", f"{ga_metrics.get('throughput', 0.0):.2f}", f"{ga_metrics.get('throughput', 0.0) - target_tph:.2f} vs. Target")
 
