@@ -1487,17 +1487,44 @@ if run_button:
                 f"3. Unused Area Overhead Cost (Unused Area * ${cost_params['cost_per_unused_area']:.2f})"
             )
             
+            # Total Estimated Annual Cost metric
+            annual_cost_help = (
+                f"Total Estimated Annual Cost is the sum of three main cost drivers:\n\n"
+                f"1. MHS Travel Cost: {ga_metrics.get('mhs_cost', 0.0):,.2f}\n"
+                f"2. WIP/Idle Time Cost: {ga_metrics.get('wip_idle_cost', 0.0):,.2f}\n"
+                f"3. Unused Area Cost: {ga_metrics.get('unused_area_cost', 0.0):,.2f}\n\n"
+                f"Calculation: MHS Cost + WIP Cost + Unused Area Cost"
+            )
+
+            
             col1.metric("Best Fitness Score", f"${ga_metrics.get('fitness', 0.0):,.2f}", 
                         help="Fitness = Revenue - Total Cost - Penalty")
             col2.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}",
-                        help=cost_help_text) # ADDED HELP TOOLTIP
+                        help=annual_cost_help) 
             col3.metric("Hourly Throughput (TPH)", f"{ga_metrics.get('throughput', 0.0):.2f}", f"{ga_metrics.get('throughput', 0.0) - target_tph:.2f} vs. Target")
 
             # --- ROW 2: PHYSICAL & FLOW METRICS ---
+            
+            # A* Flow Distance help
+            flow_distance_help = "The actual path distance required by material handlers navigating around machine obstacles (grid-based pathfinding)."
+
+            # Euclidean Distance help
+            euclidean_distance_help = "The straight-line distance between the centers of sequential machines. Used as the main distance penalty in the GA's fitness function."
+
+            # Area Utilization help
+            area_util_help = "Total machine footprint area divided by the total factory area (20 x 20 = 400 unit²)."
+            
+            # Zone Penalty help
+            zone_penalty_help = f"A score penalizing layouts where specified machines ({constraint_params['zone_1_target_machines']}) are spread further apart than the maximum allowed distance ({constraint_params['zone_1_max_spread_distance']} units)."
+            
             col4, col5, col6 = st.columns(3)
-            col4.metric("A* Flow Distance (Feasible Route)", f"{a_star_metrics.get('total_a_star_distance', 0.0):.1f} units")
-            col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
-            col6.metric("Zone 1 Constraint Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
+            col4.metric("A* Flow Distance (Feasible Route)", f"{a_star_metrics.get('total_a_star_distance', 0.0):.1f} units", help=flow_distance_help)
+            col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}", help=area_util_help)
+            col6.metric("Zone 1 Constraint Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}", help=zone_penalty_help)
+            
+            # Add Euclidean Distance to the main metrics
+            st.markdown("---")
+            st.metric("Euclidean Distance (GA Input)", f"{ga_metrics.get('distance', 0.0):.2f} units", help=euclidean_distance_help)
             
             st.markdown("---")
             
@@ -1509,15 +1536,15 @@ if run_button:
             # REVENUE Component
             col_rev.subheader("1. Estimated Revenue")
             rev_val = ga_metrics.get('revenue_value', 0.0)
-            col_rev.metric("Revenue from Optimized TPH", f"${rev_val:,.2f}")
+            col_rev.metric("Revenue from Optimized TPH", f"${rev_val:,.2f}", help=f"Calculated as: Throughput ({ga_metrics['throughput']:.2f} TPH) * Revenue Factor (${cost_params['revenue_per_tph_factor']:.2f})")
             
             # COST Components
             total_cost_calculated = ga_metrics.get('total_cost', 0.0)
             
             col_costs.subheader("2. Cost Components (Subtracted)")
-            col_costs.metric("MHS Travel Cost (MHS Cost)", f"${ga_metrics.get('mhs_cost', 0.0):,.2f}")
-            col_costs.metric("WIP/Bottleneck Cost", f"${ga_metrics.get('wip_idle_cost', 0.0):,.2f}")
-            col_costs.metric("Unused Area Cost", f"${ga_metrics.get('unused_area_cost', 0.0):,.2f}")
+            col_costs.metric("MHS Travel Cost (MHS Cost)", f"${ga_metrics.get('mhs_cost', 0.0):,.2f}", help=f"Calculated as: Euclidean Distance ({ga_metrics.get('distance', 0.0):.2f}) * Cost Factor (${cost_params['cost_per_unit_distance']:.2f})")
+            col_costs.metric("WIP/Bottleneck Cost", f"${ga_metrics.get('wip_idle_cost', 0.0):,.2f}", help="Cost incurred due to production time (bottleneck) based on provided WIP cost factor.")
+            col_costs.metric("Unused Area Cost", f"${ga_metrics.get('unused_area_cost', 0.0):,.2f}", help=f"Cost incurred from unused floor space, calculated using the Unused Area Factor (${cost_params['cost_per_unused_area']:.2f}).")
             
             # SAVINGS/PENALTY Component
             baseline_mhs_cost = REFERENCE_BASELINE_DISTANCE * cost_params['cost_per_unit_distance']
@@ -1526,8 +1553,8 @@ if run_button:
             
             col_saving.subheader("3. Cost Optimization")
             
-            col_saving.metric("MHS Cost Savings (vs Baseline)", f"${mhs_savings:,.2f}", delta=f"Baseline Cost: ${baseline_mhs_cost:,.2f}")
-            # REMOVED Final Fitness Score from here as requested.
+            col_saving.metric("MHS Cost Savings (vs Baseline)", f"${mhs_savings:,.2f}", delta=f"Baseline Cost: ${baseline_mhs_cost:,.2f}", help="Cost reduction achieved by minimizing travel distance relative to a theoretical unoptimized baseline distance of 250.0 units.")
+            # Final Fitness Score is intentionally omitted here as requested.
 
             st.header("Detailed Log Output")
             st.code(results["summary_log"])
