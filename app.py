@@ -24,7 +24,7 @@ CSS_STYLE = """
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(180deg, #FFFFFF 0%, #FFFFFF 100%);
     background-attachment: fixed;
-    color: #FFFFFF; /* Light purple text for main body */
+    color: #000000; /* Light purple text for main body */
 }
 
 /* --- Sidebar Styling (Light Purple) --- */
