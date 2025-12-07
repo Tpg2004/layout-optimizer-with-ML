@@ -26,8 +26,6 @@ CSS_STYLE = """
     background-attachment: fixed;
     color: #333333; /* Dark gray text */
 }
-
-/* --- Sidebar Styling (Light Gray) --- */
 [data-testid="stSidebar"] {
     background-color: #F0F0F0; /* Light Gray Sidebar */
     border-right: 2px solid #BBBBBB;
@@ -155,12 +153,9 @@ DEFAULT_ZONE_1_TARGETS_JSON = "[1, 2, 3, 8]"
 # Time Constants
 SECONDS_PER_HOUR = 3600
 # Reference distance for cost saving calculation (based on non-optimized initial layout)
-# This MUST be set by running the GA once with random parameters and observing the initial distance.
-# We will use the Euclidean distance from the final optimal layout (157.58) + a buffer (e.g., 250) for a non-optimized baseline.
 REFERENCE_BASELINE_DISTANCE = 250.0 
 
 # --- Core GA Utility Functions (omitted for brevity, assume correct calculation functions are here) ---
-# ... (All utility functions from previous version are included below) ...
 def initialize_layout_grid(width, height):
     return [[-1 for _ in range(height)] for _ in range(width)]
 
@@ -1483,8 +1478,19 @@ if run_button:
             
             # --- ROW 1: CORE METRICS ---
             col1, col2, col3 = st.columns(3)
-            col1.metric("Best Fitness Score", f"{42.59}", help="Fitness = (\text{Throughput/Revenue Benefit}) - (\text{MHS Cost}) - (\text{WIP/Bottleneck Cost}) - (\text{Unused Area Cost}) - (\text{Zone Penalty Cost})$$")
-            col2.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}")
+            
+            # TOTAL ESTIMATED COST - with explanation tooltip
+            cost_help_text = (
+                f"Total Estimated Annual Cost is the sum of:\n\n"
+                f"1. MHS Travel Cost (Optimized Distance * ${cost_params['cost_per_unit_distance']:.2f})\n"
+                f"2. WIP/Idle Time Cost (Based on Bottleneck Time * ${cost_params['cost_per_sec_bottleneck']:.2f})\n"
+                f"3. Unused Area Overhead Cost (Unused Area * ${cost_params['cost_per_unused_area']:.2f})"
+            )
+            
+            col1.metric("Best Fitness Score", f"${ga_metrics.get('fitness', 0.0):,.2f}", 
+                        help="Fitness = Revenue - Total Cost - Penalty")
+            col2.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}",
+                        help=cost_help_text) # ADDED HELP TOOLTIP
             col3.metric("Hourly Throughput (TPH)", f"{ga_metrics.get('throughput', 0.0):.2f}", f"{ga_metrics.get('throughput', 0.0) - target_tph:.2f} vs. Target")
 
             # --- ROW 2: PHYSICAL & FLOW METRICS ---
@@ -1518,10 +1524,10 @@ if run_button:
             optimized_mhs_cost = ga_metrics.get('distance', 0.0) * cost_params['cost_per_unit_distance']
             mhs_savings = baseline_mhs_cost - optimized_mhs_cost
             
-            col_saving.subheader("3. Cost Optimization & Fitness")
+            col_saving.subheader("3. Cost Optimization")
             
             col_saving.metric("MHS Cost Savings (vs Baseline)", f"${mhs_savings:,.2f}", delta=f"Baseline Cost: ${baseline_mhs_cost:,.2f}")
-            col_saving.metric("Final Fitness Score", f"${ga_metrics.get('fitness', 0.0):,.2f}", help=f"Fitness = ${rev_val:,.2f} - ${total_cost_calculated:,.2f} - Penalty")
+            # REMOVED Final Fitness Score from here as requested.
 
             st.header("Detailed Log Output")
             st.code(results["summary_log"])
