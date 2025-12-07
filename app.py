@@ -24,12 +24,12 @@ CSS_STYLE = """
 [data-testid="stAppViewContainer"] {
     background: linear-gradient(180deg, #eda1d9 0%, #f024ce 100%);
     background-attachment: fixed;
-    color: #E6E0FF; /* Light purple text for main body */
+    color: #FFFFFF; /* Light purple text for main body */
 }
 
 /* --- Sidebar Styling (Light Purple) --- */
 [data-testid="stSidebar"] {
-    background-color: #E6E0FF; /* Light Purple */
+    background-color: #FFFFFF; /* Light Purple */
     border-right: 2px solid #4F359B;
 }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
