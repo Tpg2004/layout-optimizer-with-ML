@@ -73,7 +73,7 @@ h1 {
     transition: all 0.2s ease;
 }
 
-/* --- Metric Cards (Clean White/Gray) --- */
+/* --- Metric Cards (Clean White/Gray) */
 [data-testid="stMetric"] {
     background-color: #F8F8F8; /* Off-white for contrast */
     border: 1px solid #CCCCCC; 
@@ -101,11 +101,10 @@ h1 {
     border: 1px solid #B2EBF2;
 }
 
-/* Matplotlib chart background (forced to match Streamlit's dark background) */
+/* Matplotlib chart background */
 .matplotlib {
     background-color: #F8F8F8 !important; 
 }
-
 
 </style>
 """
@@ -348,7 +347,9 @@ def calculate_fitness(chromosome, machines_defs_ordered_by_proc_seq, process_seq
     
     result = {"fitness": -float('inf'), "distance": float('inf'), "throughput": 0.0, 
               "is_valid": False, "zone_penalty": 0.0, "total_cost": 0.0, 
-              "utilization_ratio": 0.0, "machine_utilization": {}}
+              "utilization_ratio": 0.0, "machine_utilization": {},
+              # New cost components initialized
+              "revenue_value": 0.0, "mhs_cost": 0.0, "wip_idle_cost": 0.0, "unused_area_cost": 0.0}
 
     if len(chromosome) != len(machines_defs_ordered_by_proc_seq): return result
 
@@ -391,13 +392,16 @@ def calculate_fitness(chromosome, machines_defs_ordered_by_proc_seq, process_seq
     total_estimated_cost, mhs_cost, wip_idle_cost, unused_area_cost = calculate_layout_cost(
         total_euclidean_dist, utilization_ratio, max_stage_time, factory_w, factory_h, cost_params)
     
+    revenue_value = throughput * cost_params['revenue_per_tph_factor']
+    
+    # Store all cost components for detailed summary display
     result["total_cost"] = total_estimated_cost
+    result["mhs_cost"] = mhs_cost
+    result["wip_idle_cost"] = wip_idle_cost
+    result["unused_area_cost"] = unused_area_cost
+    result["revenue_value"] = revenue_value 
 
     # Fitness is now a function of REVENUE (Throughput) MINUS COST
-    # We simplify: Revenue is proportional to Throughput (using cost_throughput_value)
-    # The GA tries to maximize this difference.
-    
-    revenue_value = throughput * cost_params['revenue_per_tph_factor']
     
     # Penalties are heavily weighted to force adherence, then subtracted from cost savings/revenue
     total_penalties_cost = zone_penalty * fitness_weights["zone_penalty_multiplier"]
@@ -1477,31 +1481,49 @@ if run_button:
         with tab_summary:
             st.header("Key Performance Indicators")
             
-            # Use columns to showcase cost vs performance
-            col_cost_perf, col_dist_util = st.columns(2)
+            # --- ROW 1: CORE METRICS ---
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Best Fitness Score", f"${ga_metrics.get('fitness', 0.0):,.2f}", help="Fitness = Revenue - Total Cost - Penalty")
+            col2.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}")
+            col3.metric("Hourly Throughput (TPH)", f"{ga_metrics.get('throughput', 0.0):.2f}", f"{ga_metrics.get('throughput', 0.0) - target_tph:.2f} vs. Target")
+
+            # --- ROW 2: PHYSICAL & FLOW METRICS ---
+            col4, col5, col6 = st.columns(3)
+            col4.metric("A* Flow Distance (Feasible Route)", f"{a_star_metrics.get('total_a_star_distance', 0.0):.1f} units")
+            col5.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
+            col6.metric("Zone 1 Constraint Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
             
-            with col_cost_perf:
-                st.subheader("Economic & Throughput Results")
-                # Revenue - Cost = Fitness
-                st.metric("Optimal Layout Fitness (Revenue - Cost)", f"${ga_metrics.get('fitness', 0.0):,.2f}")
-                st.metric("Total Estimated Annual Cost", f"${ga_metrics.get('total_cost', 0.0):,.2f}")
-                st.metric("Hourly Throughput (TPH)", f"{ga_metrics.get('throughput', 0.0):.2f}", f"{ga_metrics.get('throughput', 0.0) - target_tph:.2f} vs. Target")
+            st.markdown("---")
+            
+            st.header("Cost Breakdown and Savings Analysis")
 
-            with col_dist_util:
-                st.subheader("Physical Metrics")
-                # Savings Calculation (relative to baseline distance)
-                baseline_mhs_cost = REFERENCE_BASELINE_DISTANCE * cost_params['cost_per_unit_distance']
-                optimized_mhs_cost = ga_metrics.get('distance', 0.0) * cost_params['cost_per_unit_distance']
-                mhs_savings = baseline_mhs_cost - optimized_mhs_cost
-                
-                st.metric("Estimated MHS Cost Savings (Annual)", f"${mhs_savings:,.2f}", delta=f"vs. Baseline Cost ${baseline_mhs_cost:,.2f}")
+            # --- COST BREAKDOWN ---
+            col_rev, col_costs, col_saving = st.columns(3)
+            
+            # REVENUE Component
+            col_rev.subheader("1. Estimated Revenue")
+            rev_val = ga_metrics.get('revenue_value', 0.0)
+            col_rev.metric("Revenue from Optimized TPH", f"${rev_val:,.2f}")
+            
+            # COST Components
+            total_cost_calculated = ga_metrics.get('total_cost', 0.0)
+            
+            col_costs.subheader("2. Cost Components (Subtracted)")
+            col_costs.metric("MHS Travel Cost (MHS Cost)", f"${ga_metrics.get('mhs_cost', 0.0):,.2f}")
+            col_costs.metric("WIP/Bottleneck Cost", f"${ga_metrics.get('wip_idle_cost', 0.0):,.2f}")
+            col_costs.metric("Unused Area Cost", f"${ga_metrics.get('unused_area_cost', 0.0):,.2f}")
+            
+            # SAVINGS/PENALTY Component
+            baseline_mhs_cost = REFERENCE_BASELINE_DISTANCE * cost_params['cost_per_unit_distance']
+            optimized_mhs_cost = ga_metrics.get('distance', 0.0) * cost_params['cost_per_unit_distance']
+            mhs_savings = baseline_mhs_cost - optimized_mhs_cost
+            
+            col_saving.subheader("3. Cost Optimization & Fitness")
+            
+            col_saving.metric("MHS Cost Savings (vs Baseline)", f"${mhs_savings:,.2f}", delta=f"Baseline Cost: ${baseline_mhs_cost:,.2f}")
+            col_saving.metric("Final Fitness Score", f"${ga_metrics.get('fitness', 0.0):,.2f}", help=f"Fitness = ${rev_val:,.2f} - ${total_cost_calculated:,.2f} - Penalty")
 
-                st.metric("A* Flow Distance (Feasible Route)", f"{a_star_metrics.get('total_a_star_distance', 0.0):.1f} units")
-                st.metric("Area Utilization", f"{ga_metrics.get('utilization_ratio', 0.0):.2%}")
-                st.metric("Zone 1 Constraint Penalty", f"{ga_metrics.get('zone_penalty', 0.0):.2f}")
-
-
-            st.header("Performance Summary & Cost Breakdown")
+            st.header("Detailed Log Output")
             st.code(results["summary_log"])
 
         with tab_ga_layout:
